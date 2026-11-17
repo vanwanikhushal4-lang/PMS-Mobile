@@ -21,6 +21,7 @@ final class Projects {
     private Projects() {}
 
     static boolean valid(JSONObject input, String action) {
+        if ("projects/records/detail".equals(action)) return ProjectRecords.validDetail(input);
         boolean taskPage = "projects/tasks".equals(action);
         if ("projects/favorite".equals(action))
             return input.length() == 2 && positiveId(input.opt("id")) && input.opt("favorite") instanceof Boolean;
@@ -99,40 +100,6 @@ final class Projects {
             update.executeUpdate();
         }
         return new JSONObject().put("kind", "project-favorite").put("projectId", id).put("favorite", favorite);
-    }
-
-    static JSONObject records(Connection db, Accounts.Account account, int id) throws SQLException {
-        if (detail(db, account, id) == null) return null;
-        return new JSONObject().put("kind", "project-records")
-            .put("projectId", id)
-            .put("requirements", linkedRecords(db, account, id, "requirement", "requirementDocument", "d.rd_id", "d.RDStatus", "''"))
-            .put("understanding", linkedRecords(db, account, id, "understanding", "UnderstandingDocument", "d.ud_id", "d.UDStatus", "''"))
-            .put("kickoff", linkedRecords(db, account, id, "kickoff", "ProjectKickOfMeeting", "''", "d.Status", "d.TypesMeeting"));
-    }
-
-    private static JSONObject linkedRecords(Connection db, Accounts.Account account, int id, String kind,
-                                            String table, String reference, String status, String format) throws SQLException {
-        // Only the three static query definitions above select identifiers or expressions.
-        String sql = "SELECT d.SR_NO, " + reference + " AS REFERENCE_CODE, " + status + " AS RECORD_STATUS,"
-            + " d.Date AS RECORD_DATE, " + format + " AS MEETING_FORMAT FROM scm_mobile_project_access a"
-            + " JOIN scm_mobile_project_record l ON l.PROJECT_ID=a.PROJECT_ID AND l.COMPANY_CODE=a.COMPANY_CODE"
-            + " JOIN " + table + " d ON d.SR_NO=l.RECORD_ID"
-            + " WHERE a.LOGIN_ID=? AND a.COMPANY_CODE=? AND a.PROJECT_ID=? AND l.RECORD_KIND=?"
-            + " ORDER BY d.SR_NO DESC LIMIT 21";
-        try (PreparedStatement query = db.prepareStatement(sql)) {
-            bindAccount(query, account);
-            query.setInt(3, id);
-            query.setString(4, kind);
-            try (ResultSet rows = query.executeQuery()) {
-                JSONArray items = new JSONArray();
-                while (items.length() < 20 && rows.next()) {
-                    items.put(new JSONObject().put("id", rows.getInt("SR_NO"))
-                        .put("reference", label(rows, "REFERENCE_CODE")).put("date", label(rows, "RECORD_DATE"))
-                        .put("status", label(rows, "RECORD_STATUS")).put("format", label(rows, "MEETING_FORMAT")));
-                }
-                return new JSONObject().put("items", items).put("hasMore", items.length() == 20 && rows.next());
-            }
-        }
     }
 
     private static void bindAccount(PreparedStatement query, Accounts.Account account) throws SQLException {

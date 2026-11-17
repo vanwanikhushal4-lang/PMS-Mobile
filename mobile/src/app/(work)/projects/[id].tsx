@@ -19,9 +19,9 @@ const taskViews: TaskView[] = ['list', 'board', 'timeline'];
 export default function ProjectDetailScreen() {
   const { state } = useSession();
   const canReadTasks = state.kind === 'active' && state.session.identity.capabilities.includes('tasks.assigned-by-me');
-  const [pane, setPane] = useState({ index: 0, shift: 0 });
+  const { id, created, view } = useLocalSearchParams<{ id: string; created?: string; view?: string }>();
+  const [pane, setPane] = useState(() => ({ index: view === 'records' ? 3 : 0, shift: 0 }));
   const records = !canReadTasks || pane.index === 3;
-  const { id, created } = useLocalSearchParams<{ id: string; created?: string }>();
   const idNumber = typeof id === 'string' && /^[1-9]\d{0,9}$/.test(id) ? Number(id) : 0;
   const projectId = idNumber <= 2_147_483_647 ? idNumber : 0;
   const read = useCallback((grant: Grant, signal: AbortSignal) => {

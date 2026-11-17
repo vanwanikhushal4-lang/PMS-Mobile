@@ -17,6 +17,47 @@ export type Profile = { email: string; phone: string; location: string; site: st
 export type ProjectRecord = { id: number; reference: string; date: string; status: string; format: string };
 export type ProjectRecordGroup = { items: ProjectRecord[]; hasMore: boolean };
 export type ProjectRecords = { projectId: number; requirements: ProjectRecordGroup; understanding: ProjectRecordGroup; kickoff: ProjectRecordGroup };
+export type ProjectRecordScope = 'requirement' | 'understanding' | 'kickoff';
+export type ProjectRecordTarget = { scope: ProjectRecordScope; id: number; recordId: number };
+export type ProjectRecordDetail = { item: ProjectRecord; fields: Record<string, string> };
+
+export const projectRecordTitles: Record<ProjectRecordScope, string> = {
+  requirement: 'Requirement document', understanding: 'Understanding document', kickoff: 'Kickoff meeting',
+};
+
+export const projectRecordSections: Record<ProjectRecordScope, readonly {
+  title: string;
+  rows: readonly (readonly [string, string])[];
+}[]> = {
+  requirement: [
+    { title: 'Requirements', rows: [['description', 'Description'], ['requirementNote', 'Requirement note']] },
+    { title: 'Submission', rows: [['purchaseOrder', 'Purchase order'], ['submittedBy', 'Submitted by'], ['designation', 'Designation'],
+      ['productManager', 'Product manager'], ['function', 'Function'], ['suite', 'Product suite'], ['tool', 'Product tool']] },
+  ],
+  understanding: [
+    { title: 'Project plan', rows: [['projectDescription', 'Project description'], ['objectives', 'Objectives'], ['projectScope', 'Scope'],
+      ['start', 'Start date'], ['end', 'End date']] },
+    { title: 'Requirements', rows: [['functional', 'Functional requirements'], ['nonfunctional', 'Nonfunctional requirements'],
+      ['technical', 'Technical requirements']] },
+    { title: 'Review', rows: [['rejectedBy', 'Rejected by'], ['rejectedDate', 'Rejection date'], ['rejectionReason', 'Rejection reason']] },
+    { title: 'Document notes', rows: [['description', 'Description'], ['requirementNote', 'Requirement note'],
+      ['understandingNote', 'Understanding note']] },
+    { title: 'Submission', rows: [['purchaseOrder', 'Purchase order'], ['requirementReference', 'Requirement document'],
+      ['submittedBy', 'Submitted by'], ['designation', 'Designation'], ['productManager', 'Product manager'], ['teamLead', 'Team lead'],
+      ['developers', 'Developers'], ['function', 'Function'], ['suite', 'Product suite'], ['tool', 'Product tool']] },
+  ],
+  kickoff: [
+    { title: 'Meeting logistics', rows: [['conference', 'Video conference'], ['meetingLink', 'Meeting link'], ['telephone', 'Telephone'],
+      ['room', 'Room type'], ['roomCapacity', 'Room capacity'], ['meetingResource', 'Meeting resource'], ['resources', 'Additional resources']] },
+    { title: 'Participants', rows: [['projectHead', 'Project head'], ['salesManager', 'Sales manager'], ['productManager', 'Product manager'],
+      ['attendees', 'Attendees']] },
+    { title: 'References', rows: [['purchaseOrder', 'Purchase order'], ['understandingReference', 'Understanding document']] },
+  ],
+};
+
+export function isProjectRecordScope(value: unknown): value is ProjectRecordScope {
+  return value === 'requirement' || value === 'understanding' || value === 'kickoff';
+}
 
 function object(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -98,14 +139,36 @@ function group(value: unknown): ProjectRecordGroup | null {
     || (body.hasMore && body.items.length !== 20)) return null;
   const items: ProjectRecord[] = [];
   for (const value of body.items as unknown[]) {
-    const row = object(value);
-    if (!row) return null;
-    const { id: number, reference, date, status, format } = row;
+    const row = record(value);
     const previous = items.at(-1);
-    if (!id(number) || (previous && number >= previous.id) || !label(reference) || !label(date) || !label(status) || !label(format)) return null;
-    items.push({ id: number, reference, date, status, format });
+    if (!row || (previous && row.id >= previous.id)) return null;
+    items.push(row);
   }
   return { items, hasMore: body.hasMore };
+}
+
+function record(value: unknown): ProjectRecord | null {
+  const { id: number, reference, date, status, format } = object(value) ?? {};
+  return id(number) && label(reference) && label(date) && label(status) && label(format)
+    ? { id: number, reference, date, status, format } : null;
+}
+
+export function decodeProjectRecordDetail(value: unknown, target: ProjectRecordTarget): ProjectRecordDetail | null {
+  const body = object(value);
+  if (body?.kind !== 'project-record-detail' || body.projectId !== target.id || body.scope !== target.scope) return null;
+  const item = record(body.item);
+  const raw = object(body.fields);
+  if (!item || item.id !== target.recordId || !raw) return null;
+  const fields: Record<string, string> = {};
+  for (const section of projectRecordSections[target.scope]) {
+    for (const [key] of section.rows) {
+      const text = raw[key];
+      if (text === undefined) continue;
+      if (typeof text !== 'string' || !text || text.length > 65_535) return null;
+      fields[key] = text;
+    }
+  }
+  return { item, fields };
 }
 
 export function decodeProjectRecords(value: unknown): ProjectRecords | null {

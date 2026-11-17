@@ -128,6 +128,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 sql.execute("INSERT INTO requirementDocument VALUES (61,'RD-61','RD Approved By MD','12-11-2026'), (62,'RD-62','Submitted','15-11-2026'), (63,'RD-63','Submitted','16-11-2026')");
                 sql.execute("INSERT INTO UnderstandingDocument VALUES (71,'UD-71','UD Approved By MD','13-11-2026')");
                 sql.execute("INSERT INTO ProjectKickOfMeeting VALUES (81,'Meeting Scheduled','19-11-2026 10:00','Video conference')");
+                seedRecordDetails(sql);
                 sql.execute("INSERT INTO scm_mobile_project_record VALUES (44,'QA-A','requirement',61), (44,'QA-A','understanding',71), (44,'QA-A','kickoff',81), (44,'QA-B','requirement',62), (51,'QA-B','requirement',63)");
                 sql.execute("CREATE TABLE DaywiseTask (SR_NO INT PRIMARY KEY, STATUS VARCHAR(120), CUSTOMERNAME VARCHAR(120), PRODUCTSUIT VARCHAR(120), PRODUCTTOOL VARCHAR(120), DESCRIPTION VARCHAR(2000), MODULE_NAME VARCHAR(120), TEAM_LEADER VARCHAR(120), DEVELOPER_NAME VARCHAR(120), START_DATE VARCHAR(120), END_DATE VARCHAR(120), ASSIGNBY VARCHAR(128))");
                 sql.execute("INSERT INTO DaywiseTask VALUES"
@@ -268,6 +269,8 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
         Files.write(root.resolve("Riverside masked.pdf"), fixturePdf("Masked purchase order - Riverside pilot"));
         Files.write(root.resolve("Requirements61.pdf"), fixturePdf("Requirements for Riverside"));
         Files.write(root.resolve("Understanding71.pdf"), fixturePdf("Understanding for Riverside"));
+        Files.write(root.resolve("Riverside agenda.pdf"), fixturePdf("Kickoff agenda for Riverside"));
+        Files.write(root.resolve("Riverside meeting plan.pdf"), fixturePdf("Kickoff plan for Riverside"));
         Files.write(root.resolve("Unmasked PO.pdf"), fixturePdf("Unmasked fixture restricted to sales"));
         Files.write(root.resolve("Riverside – features.txt"), "VPN pilot; device policy validation.\n".getBytes(StandardCharsets.UTF_8));
         Files.write(root.resolve("Scope61.txt"), "Riverside pilot deployment scope.\n".getBytes(StandardCharsets.UTF_8));
@@ -276,6 +279,34 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
         try { Files.createSymbolicLink(root.resolve("Linked file.txt"), outside); }
         catch (UnsupportedOperationException | java.io.IOException ignored) { /* Symlink creation is optional on Windows fixtures. */ }
         return root;
+    }
+
+    private static void seedRecordDetails(Statement sql) throws java.sql.SQLException {
+        for (String column : new String[]{"POnumber", "productSuitName", "securityTool", "FunctionName",
+                "productManager", "UserName", "Designation", "Description", "rdNote"}) {
+            sql.execute("ALTER TABLE requirementDocument ADD " + column + " VARCHAR(2000)");
+        }
+        for (String column : new String[]{"POnumber", "rd_id", "productSuite", "securityTool", "FunctionName",
+                "productManager", "Team_Leader", "Developers", "Username", "Designation", "project_startDate", "project_endDate",
+                "Description", "projectDesc", "projectObj", "project_Scope", "function_Requirement", "nonFunction_Requirement",
+                "technical_Requirement", "rdNote", "udNote", "rejectedByMD", "rejectedMDDate", "rejectMDReason"}) {
+            sql.execute("ALTER TABLE UnderstandingDocument ADD " + column + " VARCHAR(2000)");
+        }
+        for (String column : new String[]{"Po_Number", "UD_number", "ProjectHead", "SalesManager", "ProductionManager",
+                "TypesOfRooms", "RoomCapacity", "MeetingResource", "PersonInMetting", "ResourceInMeeting", "TelephonicMeeting",
+                "VideoConferenceMeeting", "GeneratedLink", "UploadFile1", "UploadFile2"}) {
+            sql.execute("ALTER TABLE ProjectKickOfMeeting ADD " + column + " VARCHAR(2000)");
+        }
+        sql.execute("UPDATE requirementDocument SET POnumber='PO-910', UserName='Alex Rao', Designation='NA',"
+            + " rdNote='Validate VPN coverage on the first 24 devices.', Description='Pilot deployment requirements' WHERE SR_NO=61");
+        sql.execute("UPDATE requirementDocument SET rdNote='Unlinked company material' WHERE SR_NO=62");
+        sql.execute("UPDATE UnderstandingDocument SET POnumber='PO-910', rd_id='RD-61', Team_Leader='Dev Singh', Developers='Noor Paul',"
+            + " project_startDate='19.11.2026', project_endDate='29.11.2026', projectDesc='Riverside VPN pilot',"
+            + " projectObj='Verify remote access for the support team', project_Scope='Support laptops',"
+            + " function_Requirement='Sign in through the company directory', technical_Requirement='Existing VPN cluster' WHERE SR_NO=71");
+        sql.execute("UPDATE ProjectKickOfMeeting SET Po_Number='PO-910', UD_number='UD-71', ProjectHead='Anika Mehta',"
+            + " VideoConferenceMeeting='Teams', GeneratedLink='https://meet.fixture.invalid/riverside-kickoff',"
+            + " UploadFile1='Riverside agenda.pdf', UploadFile2='Riverside meeting plan.pdf' WHERE SR_NO=81");
     }
 
     private static byte[] fixturePdf(String message) {

@@ -27,16 +27,19 @@ import org.json.JSONObject;
 final class ProjectAttachments {
     private enum Scope {
         ORDER("purchase-order", null, new Field("masked-po", "MassPOFile"), new Field("product-features", "productFeaturedFileList")),
-        REQUIREMENT("requirement", "requirementDocument", new Field("requirement-file", "rdUpload"), new Field("masked-po", "maskedPOfile"),
+        REQUIREMENT(ProjectRecords.Kind.REQUIREMENT, new Field("requirement-file", "rdUpload"), new Field("masked-po", "maskedPOfile"),
             new Field("scope-of-work", "ScopeWork_File"), new Field("rfp", "RFP_File"), new Field("other", "Other_File")),
-        UNDERSTANDING("understanding", "UnderstandingDocument", new Field("understanding-file", "udFile"),
+        UNDERSTANDING(ProjectRecords.Kind.UNDERSTANDING, new Field("understanding-file", "udFile"),
             new Field("other-understanding", "Other_UDFile"), new Field("requirement-file", "rdFile"),
             new Field("masked-po", "maskedPOFile"), new Field("scope-of-work", "ScopeWork_File"), new Field("rfp", "RFP_File"),
-            new Field("other", "Other_File"));
+            new Field("other", "Other_File")),
+        KICKOFF(ProjectRecords.Kind.KICKOFF, new Field("kickoff-agenda", "UploadFile1"), new Field("kickoff-plan", "UploadFile2"));
 
-        final String key, table;
+        final String key;
+        final ProjectRecords.Kind record;
         final Field[] fields;
-        Scope(String key, String table, Field... fields) { this.key = key; this.table = table; this.fields = fields; }
+        Scope(String key, ProjectRecords.Kind record, Field... fields) { this.key = key; this.record = record; this.fields = fields; }
+        Scope(ProjectRecords.Kind record, Field... fields) { this(record.key, record, fields); }
     }
 
     private static final class Field {
@@ -76,20 +79,15 @@ final class ProjectAttachments {
         StringJoiner columns = new StringJoiner(",");
         for (Field field : target.scope.fields) columns.add(alias + field.column);
         StringBuilder sql = new StringBuilder("SELECT ").append(columns);
-        if (order) {
-            sql.append(PublishedProjects.ORDER_SCOPE).append(PublishedProjects.ORDER_FILTER).append(" AND p.SR_NO=?");
-        } else {
-            sql.append(" FROM scm_mobile_project_access a JOIN ProjectData p ON p.SR_NO=a.PROJECT_ID")
-                .append(" JOIN scm_mobile_project_record l ON l.PROJECT_ID=a.PROJECT_ID AND l.COMPANY_CODE=a.COMPANY_CODE")
-                .append(" JOIN ").append(target.scope.table).append(" d ON d.SR_NO=l.RECORD_ID")
-                .append(" WHERE a.LOGIN_ID=? AND a.COMPANY_CODE=? AND a.PROJECT_ID=? AND l.RECORD_KIND=? AND l.RECORD_ID=?");
-        }
+        if (order) sql.append(PublishedProjects.ORDER_SCOPE).append(PublishedProjects.ORDER_FILTER).append(" AND p.SR_NO=?");
+        else sql.append(target.scope.record.scopedFrom()).append(" AND l.RECORD_ID=?");
         try (PreparedStatement query = db.prepareStatement(sql.toString())) {
-            query.setInt(1, account.id);
-            query.setString(2, account.companyCode);
-            query.setInt(3, target.id);
-            if (!order) {
-                query.setString(4, target.scope.key);
+            if (order) {
+                query.setInt(1, account.id);
+                query.setString(2, account.companyCode);
+                query.setInt(3, target.id);
+            } else {
+                ProjectRecords.bindScope(query, account, target.id, target.scope.record);
                 query.setInt(5, target.recordId);
             }
             try (ResultSet row = query.executeQuery()) {

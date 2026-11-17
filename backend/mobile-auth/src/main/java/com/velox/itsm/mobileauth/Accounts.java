@@ -71,7 +71,8 @@ public final class Accounts {
         try (Connection db = source.getConnection()) {
             switch (action) {
                 case "projects/detail": return Projects.detail(db, account, input.getInt("id"));
-                case "projects/records": return Projects.records(db, account, input.getInt("id"));
+                case "projects/records": return ProjectRecords.list(db, account, input.getInt("id"));
+                case "projects/records/detail": return ProjectRecords.detail(db, account, input);
                 case "projects/tasks": return AssignedTasks.projectPage(db, account, input);
                 case "projects/favorite": return Projects.favorite(db, account, input.getInt("id"), input.getBoolean("favorite"));
                 case "projects/create-options": return ProjectCreation.options(db, account, input.optString("query"), input.optString("functionQuery"));

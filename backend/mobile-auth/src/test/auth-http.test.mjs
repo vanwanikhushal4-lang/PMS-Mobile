@@ -639,6 +639,34 @@ await test('Publish Project browses scoped progress and opens the exact purchase
   assert.match(features.headers.get('content-disposition'), /Riverside%20%E2%80%93%20features\.txt$/);
   assert.equal(await features.text(), 'VPN pilot; device policy validation.\n');
   const requirement = { scope: 'requirement', id: 44, recordId: 61 };
+  const understanding = { scope: 'understanding', id: 44, recordId: 71 };
+  const kickoff = { scope: 'kickoff', id: 44, recordId: 81 };
+  const rd = await client.projectRecordDetail(publisher.grant, requirement);
+  assert.equal(rd.item.reference, 'RD-61');
+  assert.equal(rd.fields.submittedBy, 'Alex Rao');
+  assert.equal(rd.fields.requirementNote, 'Validate VPN coverage on the first 24 devices.');
+  assert.equal(rd.fields.designation, undefined);
+  const ud = await client.projectRecordDetail(publisher.grant, understanding);
+  assert.equal(ud.item.status, 'UD Approved By MD');
+  assert.equal(ud.fields.requirementReference, 'RD-61');
+  assert.equal(ud.fields.end, '29.11.2026');
+  assert.equal(ud.fields.functional, 'Sign in through the company directory');
+  const meeting = await client.projectRecordDetail(publisher.grant, kickoff);
+  assert.equal(meeting.item.format, 'Video conference');
+  assert.equal(meeting.item.date, '19-11-2026 10:00');
+  assert.equal(meeting.fields.projectHead, 'Anika Mehta');
+  assert.equal(meeting.fields.meetingLink, 'https://meet.fixture.invalid/riverside-kickoff');
+  for (const target of [{ ...requirement, recordId: 62 }, { ...requirement, id: 51, recordId: 63 }, { ...kickoff, recordId: 61 }]) {
+    await assert.rejects(() => client.projectRecordDetail(publisher.grant, target), { code: 'not-found' });
+  }
+  await assert.rejects(() => client.projectRecordDetail(other.grant, kickoff), { code: 'not-found' });
+  const recordRequest = (target, grant) => fetch(new URL('projects/records/detail', datesBase), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(grant ? { Authorization: 'Bearer ' + grant.sessionToken } : {}) },
+    body: JSON.stringify(target),
+  });
+  assert.equal((await recordRequest(kickoff)).status, 401);
+  assert.equal((await recordRequest({ ...kickoff, scope: 'unknown' }, publisher.grant)).status, 400);
+  assert.equal((await recordRequest({ ...kickoff, recordId: '81' }, publisher.grant)).status, 400);
   assert.deepEqual((await client.projectAttachments(publisher.grant, requirement)).map(({ kind }) => kind),
     ['requirement-file', 'masked-po', 'scope-of-work', 'rfp', 'other']);
   const scopeFile = await download(publisher.grant, { ...requirement, kind: 'scope-of-work' });
@@ -649,8 +677,16 @@ await test('Publish Project browses scoped progress and opens the exact purchase
   }
   assert.equal((await download(publisher.grant, { ...requirement, recordId: 62, kind: 'requirement-file' })).status, 404);
   assert.equal((await download(publisher.grant, { ...requirement, id: 51, kind: 'requirement-file' })).status, 404);
-  assert.deepEqual((await client.projectAttachments(publisher.grant, { scope: 'understanding', id: 44, recordId: 71 }))
+  assert.deepEqual((await client.projectAttachments(publisher.grant, understanding))
     .map(({ kind }) => kind), ['understanding-file', 'requirement-file']);
+  assert.deepEqual(await client.projectAttachments(publisher.grant, kickoff), [
+    { kind: 'kickoff-agenda', name: 'Riverside agenda.pdf', mimeType: 'application/pdf' },
+    { kind: 'kickoff-plan', name: 'Riverside meeting plan.pdf', mimeType: 'application/pdf' },
+  ]);
+  const plan = await download(publisher.grant, { ...kickoff, kind: 'kickoff-plan' });
+  assert.equal(plan.status, 200);
+  assert.match(await plan.text(), /Kickoff plan for Riverside/);
+  assert.equal((await download(other.grant, { ...kickoff, kind: 'kickoff-plan' })).status, 404);
 });
 
 await test('authenticator enrollment generates a usable secret and prevents reusing a time slot', async () => {

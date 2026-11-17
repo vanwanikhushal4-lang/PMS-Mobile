@@ -55,7 +55,8 @@ public final class AuthService implements AutoCloseable {
         long now = clock.getAsLong();
         switch (action) {
             case "session": case "sign-out": case "workspace": case "profile":
-            case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
+            case "projects/list": case "projects/detail": case "projects/records": case "projects/records/detail":
+            case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
             case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
             case "projects/attachments/list": case "projects/attachments/download":
@@ -237,7 +238,8 @@ public final class AuthService implements AutoCloseable {
                 JSONObject profile = accounts.profile(account);
                 result = profile == null ? rejected(401, "expired") : reply(200, profile);
                 break;
-            case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
+            case "projects/list": case "projects/detail": case "projects/records": case "projects/records/detail":
+            case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
             case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
             case "projects/attachments/list": case "projects/attachments/download":

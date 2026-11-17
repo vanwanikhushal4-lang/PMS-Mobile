@@ -16,6 +16,8 @@ const titles: Record<AttachmentKind, string> = {
   'requirement-file': 'Requirement document',
   'understanding-file': 'Understanding document',
   'other-understanding': 'Additional understanding file',
+  'kickoff-agenda': 'Meeting agenda',
+  'kickoff-plan': 'Plan of action',
   'scope-of-work': 'Scope of work',
   rfp: 'Request for proposal',
   other: 'Other supporting file',

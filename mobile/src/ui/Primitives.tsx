@@ -61,11 +61,11 @@ export function Action({ label, onPress, icon = 'arrow', secondary = false, busy
   </Animated.View>;
 }
 
-export function DetailRecord({ rows }: { rows: readonly (readonly [string, string])[] }) {
+export function DetailRecord({ rows, selectable = false }: { rows: readonly (readonly [string, string])[]; selectable?: boolean }) {
   return <View style={styles.record}>
     {rows.map(([label, value], index) => <View key={label} style={[styles.detail, index > 0 && styles.divided]}>
       <Text style={type.caption}>{label}</Text>
-      <Text style={value ? styles.value : type.caption}>{value || 'Not provided'}</Text>
+      <Text selectable={selectable && !!value} style={value ? styles.value : type.caption}>{value || 'Not provided'}</Text>
     </View>)}
   </View>;
 }

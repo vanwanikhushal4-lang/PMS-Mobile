@@ -1,10 +1,11 @@
+import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { AuthError } from '../scm/auth-api';
 import { authClient } from '../scm/auth-config';
-import type { Project, ProjectRecordGroup, ProjectRecords } from '../scm/projects-contract';
+import { projectRecordTitles, type Project, type ProjectRecordGroup, type ProjectRecordScope, type ProjectRecords } from '../scm/projects-contract';
 import { useSession } from '../scm/session';
-import { FormMessage, TextAction } from './Access';
+import { FormMessage, Phase, TextAction } from './Access';
 import { Icon, type } from './Primitives';
 import { ProjectAttachmentPanel } from './ProjectAttachmentPanel';
 import { useReducedMotion } from './motion';
@@ -108,9 +109,9 @@ export function ProjectFavorite({ id, saved }: { id: number; saved: boolean }) {
 
 export function ProjectRecordList({ records }: { records: ProjectRecords }) {
   const [open, setOpen] = useState('');
-  const groups: [string, ProjectRecordGroup, 'requirement' | 'understanding' | null][] = [
+  const groups: [string, ProjectRecordGroup, ProjectRecordScope][] = [
     ['Requirement documents', records.requirements, 'requirement'], ['Understanding documents', records.understanding, 'understanding'],
-    ['Kickoff meetings', records.kickoff, null],
+    ['Kickoff meetings', records.kickoff, 'kickoff'],
   ];
   const available = groups.filter(([, group]) => group.items.length > 0);
   if (!available.length) return <Text style={type.body}>This project has no linked records.</Text>;
@@ -121,13 +122,23 @@ export function ProjectRecordList({ records }: { records: ProjectRecords }) {
         {group.items.map((item, index) => {
           const key = scope + '-' + item.id;
           const action = open === key ? 'Hide files' : 'Files';
+          const name = item.reference || item.format || projectRecordTitles[scope];
+          const accessibleName = !item.reference && item.date ? `${name}, ${item.date}` : name;
           return <View key={item.id} style={[styles.record, index > 0 && styles.divided]}>
-            {item.reference || item.format ? <Text style={styles.title}>{item.reference || item.format}</Text> : null}
+            <Text style={styles.title}>{name}</Text>
             {item.status ? <Text style={type.eyebrow}>{item.status}</Text> : null}
             <Text style={type.caption}>{item.date || 'Date unavailable'}</Text>
-            {scope ? <TextAction label={action} accessibilityLabel={action + ' for ' + (item.reference || scope)}
-              onPress={() => setOpen(open === key ? '' : key)} /> : null}
-            {scope && open === key ? <ProjectAttachmentPanel target={{ scope, id: records.projectId, recordId: item.id }} /> : null}
+            <View style={styles.recordActions}>
+              <TextAction label="Details" accessibilityLabel={'Details for ' + accessibleName} onPress={() => router.push({
+                pathname: '/projects/[id]/records/[scope]/[recordId]',
+                params: { id: records.projectId, scope, recordId: item.id },
+              })} />
+              <TextAction label={action} accessibilityLabel={action + ' for ' + accessibleName}
+                onPress={() => setOpen((current) => current === key ? '' : key)} />
+            </View>
+            {open === key ? <Phase shift={8}>
+              <ProjectAttachmentPanel target={{ scope, id: records.projectId, recordId: item.id }} />
+            </Phase> : null}
           </View>;
         })}
       </View>
@@ -151,5 +162,6 @@ const styles = StyleSheet.create({
   group: { gap: 8 },
   register: { backgroundColor: color.panel, paddingHorizontal: 16, borderRadius: 8, borderColor: color.edge, borderWidth: 1 },
   record: { paddingVertical: 12, gap: 4, minHeight: 56 },
+  recordActions: { flexDirection: 'row', flexWrap: 'wrap', columnGap: 20 },
   divided: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: color.edge },
 });

@@ -1,10 +1,12 @@
-export type AttachmentTarget = { scope: 'purchase-order'; id: number }
-  | { scope: 'requirement' | 'understanding'; id: number; recordId: number };
+import type { ProjectRecordTarget } from './projects-contract.ts';
+
+export type AttachmentTarget = { scope: 'purchase-order'; id: number } | ProjectRecordTarget;
 
 const kinds = {
   'purchase-order': ['masked-po', 'product-features'],
   requirement: ['requirement-file', 'masked-po', 'scope-of-work', 'rfp', 'other'],
   understanding: ['understanding-file', 'other-understanding', 'requirement-file', 'masked-po', 'scope-of-work', 'rfp', 'other'],
+  kickoff: ['kickoff-agenda', 'kickoff-plan'],
 } as const;
 
 export type AttachmentKind = (typeof kinds)[keyof typeof kinds][number];
