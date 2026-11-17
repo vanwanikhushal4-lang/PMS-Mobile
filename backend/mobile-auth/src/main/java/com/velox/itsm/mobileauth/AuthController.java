@@ -35,7 +35,9 @@ public class AuthController {
         "/tasks/assigned-by-me", "/tasks/assigned-to-me", "/tasks/completed", "/tasks/work-log", "/tasks/progress", "/tasks/complete",
         "/tasks/dates/list", "/tasks/dates/detail", "/tasks/dates/request", "/tasks/dates/approve",
         "/tasks/assignments/list", "/tasks/assignments/project-options", "/tasks/assignments/options",
-        "/tasks/assignments/create", "/tasks/assignments/reassign"}, method = RequestMethod.POST)
+        "/tasks/assignments/create", "/tasks/assignments/reassign", "/tasks/assignments/reassign-bulk",
+        "/tasks/assignments/contexts", "/tasks/assignments/standalone-options",
+        "/tasks/assignments/standalone-create"}, method = RequestMethod.POST)
     public void post(HttpServletRequest request, HttpServletResponse response) throws IOException { respond(request, response, true); }
 
     @RequestMapping(value = {"/session", "/workspace", "/profile"}, method = RequestMethod.GET)

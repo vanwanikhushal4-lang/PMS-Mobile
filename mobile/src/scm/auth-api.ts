@@ -1,7 +1,8 @@
 import { decodeAuthStep, type AuthStep } from './auth-contract.ts';
 import { decodeWorkspace } from './workspace-contract.ts';
 import { decodeProfile, decodeProject, decodeProjectRecords, decodeProjects } from './projects-contract.ts';
-import { decodeAssignedTasks, decodeTaskAssignees, decodeTaskDates, decodeWorkLog, type DateQueue, type TaskDraft } from './tasks-contract.ts';
+import { decodeAssignedTasks, decodeTaskAssignees, decodeTaskContexts, decodeTaskDates, decodeWorkLog,
+  type DateQueue, type StandaloneTask, type TaskContext, type TaskDraft, type TaskTransfer } from './tasks-contract.ts';
 
 export type AuthConfig = { url: URL; fixture: boolean };
 export type Grant = { sessionToken: string; expiresAt: number };
@@ -32,7 +33,8 @@ export class AuthError extends Error {
   readonly code: 'transport' | 'bad-response' | 'expired' | 'unavailable' | 'forbidden' | 'not-found' | 'progress-already-logged' | 'task-closed'
     | 'date-range' | 'date-reason-length' | 'date-change-conflict' | 'date-no-reviewer'
     | 'invalid-task-draft' | 'task-weight-limit' | 'task-assignment-conflict' | 'candidate-unavailable';
-  constructor(code: AuthError['code']) { super(code); this.name = 'AuthError'; this.code = code; }
+  readonly taskId?: number;
+  constructor(code: AuthError['code'], taskId?: number) { super(code); this.name = 'AuthError'; this.code = code; this.taskId = taskId; }
 }
 
 function jsonObject(value: unknown): Record<string, unknown> {
@@ -72,13 +74,18 @@ export function restoreGrant(value: string, endpoint: string, now = Date.now()):
 }
 
 type Requester = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok' | 'status' | 'url' | 'headers' | 'json'>>;
+function validTaskId(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647;
+}
+
 export function createAuthClient(config: AuthConfig, send: Requester = fetch, timeoutMs = 9000) {
   async function request(path: string, body: object | undefined, signal?: AbortSignal, token?: string) {
     const url = new URL(path, config.url);
     const missingReason = ['projects/detail', 'projects/records', 'projects/tasks', 'projects/favorite',
       'tasks/assignments/project-options', 'tasks/assignments/create'].includes(path) ? 'project-not-found'
       : ['tasks/work-log', 'tasks/progress', 'tasks/complete', 'tasks/dates/detail', 'tasks/dates/request', 'tasks/dates/approve',
-        'tasks/assignments/options', 'tasks/assignments/reassign'].includes(path) ? 'task-not-found' : null;
+        'tasks/assignments/options', 'tasks/assignments/reassign', 'tasks/assignments/reassign-bulk'].includes(path) ? 'task-not-found'
+        : path.startsWith('tasks/assignments/standalone-') ? 'context-not-found' : null;
     const abort = new AbortController();
     const cancel = () => abort.abort();
     signal?.addEventListener('abort', cancel, { once: true });
@@ -113,13 +120,16 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
         if (kind === 'rejected' && (((reason === 'date-range' || reason === 'date-reason-length') && response.status === 400)
             || ((reason === 'date-change-conflict' || reason === 'date-no-reviewer') && response.status === 409))) throw new AuthError(reason);
       }
-      if ((path === 'tasks/assignments/create' || path === 'tasks/assignments/reassign') && (response.status === 400 || response.status === 409)) {
-        const { kind, reason } = jsonObject(data);
+      if (path.startsWith('tasks/assignments/') && (response.status === 400 || response.status === 409)) {
+        const { kind, reason, taskId } = jsonObject(data);
         if (kind === 'rejected' && (reason === 'invalid-task-draft' || reason === 'task-weight-limit'
-            || reason === 'task-assignment-conflict' || reason === 'candidate-unavailable')) throw new AuthError(reason);
+            || reason === 'task-assignment-conflict' || reason === 'candidate-unavailable')) {
+          throw new AuthError(reason, validTaskId(taskId) ? taskId : undefined);
+        }
       }
       if (missingReason && response.status === 404 && jsonObject(data).reason === missingReason) {
-        throw new AuthError('not-found');
+        const { taskId } = jsonObject(data);
+        throw new AuthError('not-found', validTaskId(taskId) ? taskId : undefined);
       }
       if (!response.ok && jsonObject(data).kind !== 'rejected') throw new AuthError('bad-response');
       return data;
@@ -229,16 +239,35 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       if (!data || data.id !== id || (data.revision === null) !== project) throw new AuthError('bad-response');
       return data;
     },
-    createTask: async (grant: Grant, id: number, draft: TaskDraft, signal?: AbortSignal) => {
-      const data = jsonObject(await request('tasks/assignments/create', { ...draft, id }, signal, grant.sessionToken));
+    taskContexts: async (grant: Grant, query?: string, signal?: AbortSignal) => {
+      const data = decodeTaskContexts(await request('tasks/assignments/contexts', { query }, signal, grant.sessionToken));
+      if (!data) throw new AuthError('bad-response');
+      return data;
+    },
+    standaloneAssignees: async (grant: Grant, context: TaskContext, query?: string, signal?: AbortSignal) => {
+      const data = decodeTaskAssignees(await request('tasks/assignments/standalone-options', { context, query }, signal, grant.sessionToken));
+      if (!data || data.id !== null || data.revision !== null || data.context?.customer !== context.customer
+          || data.context.suite !== context.suite || data.context.tool !== context.tool) throw new AuthError('bad-response');
+      return data;
+    },
+    createTask: async (grant: Grant, target: number | StandaloneTask, draft: TaskDraft, signal?: AbortSignal) => {
+      const project = typeof target === 'number';
+      const path = project ? 'tasks/assignments/create' : 'tasks/assignments/standalone-create';
+      const data = jsonObject(await request(path, { ...draft, ...(project ? { id: target } : target) }, signal, grant.sessionToken));
       const { taskId } = data;
-      if (data.kind !== 'task-created' || data.projectId !== id || typeof taskId !== 'number'
-          || !Number.isSafeInteger(taskId) || taskId <= 0 || taskId > 2_147_483_647) throw new AuthError('bad-response');
+      if (data.kind !== 'task-created' || data.projectId !== (project ? target : null) || !validTaskId(taskId)) throw new AuthError('bad-response');
       return taskId;
     },
     reassignTask: async (grant: Grant, id: number, revision: string, candidate: string, signal?: AbortSignal) => {
       const data = jsonObject(await request('tasks/assignments/reassign', { id, revision, candidate }, signal, grant.sessionToken));
       if (data.kind !== 'task-reassigned' || data.taskId !== id) throw new AuthError('bad-response');
+    },
+    reassignTasks: async (grant: Grant, items: readonly TaskTransfer[], signal?: AbortSignal) => {
+      const data = jsonObject(await request('tasks/assignments/reassign-bulk', { items }, signal, grant.sessionToken));
+      const expected = items.map((item) => item.id).sort((a, b) => a - b);
+      const ids = data.taskIds;
+      if (data.kind !== 'tasks-reassigned' || !Array.isArray(ids) || ids.length !== expected.length
+          || expected.some((id, index) => ids[index] !== id)) throw new AuthError('bad-response');
     },
     signOut: async (grant: Grant, signal?: AbortSignal) => { await request('sign-out', {}, signal, grant.sessionToken); },
     startRecovery: async (details: { companyCode: string; username: string; channel: 'email' | 'sms' }, signal?: AbortSignal) => decodeRecovery(await request('recovery/start', details, signal)),

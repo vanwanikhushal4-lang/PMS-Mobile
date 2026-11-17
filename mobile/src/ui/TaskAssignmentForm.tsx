@@ -4,7 +4,7 @@ import { AuthError, type Grant } from '../scm/auth-api';
 import { authClient } from '../scm/auth-config';
 import { useProtectedRead } from '../scm/protected-read';
 import { useSession } from '../scm/session';
-import type { TaskAssignee } from '../scm/tasks-contract';
+import type { StandaloneTask, TaskAssignee, TaskTransfer } from '../scm/tasks-contract';
 import { AccessRail, Field, FormMessage, Phase, SearchField, TextAction } from './Access';
 import { Action, Icon, type } from './Primitives';
 import { WorkspaceTabs } from './Workspace';
@@ -28,9 +28,18 @@ function message(error: unknown) {
   return 'Couldn’t confirm the assignment. Retry to check whether it was saved.';
 }
 
-export function TaskAssignmentForm({ id, create, onDone, cancel }: {
-  id: number; create: boolean; onDone: (taskId: number) => void; cancel: () => void;
+export type PreparedAssignment = TaskTransfer & { person: string };
+
+type Target = { kind: 'project'; id: number } | { kind: 'standalone'; scope: StandaloneTask }
+  | { kind: 'reassign'; id: number; stage?: (item: PreparedAssignment) => void };
+
+export function TaskAssignmentForm({ target, onDone, cancel, cancelLabel = 'Cancel', progress }: {
+  target: Target; onDone?: (taskId: number) => void; cancel: () => void; cancelLabel?: string;
+  progress?: { labels: readonly string[]; offset: number };
 }) {
+  const create = target.kind !== 'reassign';
+  const scope = target.kind === 'standalone' ? target.scope : null;
+  const id = target.kind === 'standalone' ? 0 : target.id;
   const { state, expire } = useSession();
   const [requestKey] = useState(submissionKey);
   const [query, setQuery] = useState('');
@@ -44,8 +53,9 @@ export function TaskAssignmentForm({ id, create, onDone, cancel }: {
   useEffect(() => () => pending.current?.abort(), []);
   const read = useCallback((grant: Grant, signal: AbortSignal) => {
     if (!authClient) return Promise.reject(new AuthError('unavailable'));
-    return authClient.assignees(grant, id, create, term || undefined, signal);
-  }, [create, id, term]);
+    return scope ? authClient.standaloneAssignees(grant, scope.context, term || undefined, signal)
+      : authClient.assignees(grant, id, create, term || undefined, signal);
+  }, [create, id, scope, term]);
   const { result, reload } = useProtectedRead(read);
 
   function search(value: string) {
@@ -62,6 +72,10 @@ export function TaskAssignmentForm({ id, create, onDone, cancel }: {
       return;
     }
     if (!create && !selection.revision) return;
+    if (target.kind === 'reassign' && target.stage && selection.revision) {
+      target.stage({ id, revision: selection.revision, candidate: selection.person.key, person: selection.person.name });
+      return;
+    }
     const { grant } = state;
     const request = new AbortController();
     pending.current = request;
@@ -71,12 +85,12 @@ export function TaskAssignmentForm({ id, create, onDone, cancel }: {
     try {
       let taskId = id;
       if (create) {
-        taskId = await authClient.createTask(grant, id, { ...draft, priority: priorities[draft.priority],
+        taskId = await authClient.createTask(grant, scope ?? id, { ...draft, priority: priorities[draft.priority],
           candidate: selection.person.key, requestKey }, request.signal);
       } else if (selection.revision) {
         await authClient.reassignTask(grant, id, selection.revision, selection.person.key, request.signal);
       }
-      if (!request.signal.aborted) onDone(taskId);
+      if (!request.signal.aborted) onDone?.(taskId);
     } catch (failure) {
       if (request.signal.aborted) return;
       const code = failure instanceof AuthError ? failure.code : null;
@@ -96,7 +110,7 @@ export function TaskAssignmentForm({ id, create, onDone, cancel }: {
   }
 
   return <View style={styles.content}>
-    {create ? <AccessRail labels={steps} index={step} /> : null}
+    {create ? <AccessRail labels={progress?.labels ?? steps} index={step + (progress?.offset ?? 0)} /> : null}
     {error ? <FormMessage message={error} /> : null}
     {step !== 0 && selection ? <Phase key={step} shift={14}>
       <View style={styles.selected}>
@@ -132,7 +146,8 @@ export function TaskAssignmentForm({ id, create, onDone, cancel }: {
         Keyboard.dismiss();
         if (!draft.module.trim() || !draft.description.trim()) setError('Enter the task title and description.');
         else { setError(''); setStep(2); }
-      }} /> : <Action label={busy ? 'Saving…' : create ? 'Create task' : 'Confirm reassignment'} icon="check"
+      }} /> : <Action label={busy ? 'Saving…' : create ? 'Create task'
+        : target.kind === 'reassign' && target.stage ? 'Add to batch' : 'Confirm reassignment'} icon="check"
         onPress={() => void submit()} busy={busy} testID="assignment-submit" />}
       {create && step === 2 ? <TextAction label="Back to details" disabled={busy} onPress={() => {
         Keyboard.dismiss(); setError(''); setStep(1);
@@ -163,7 +178,7 @@ export function TaskAssignmentForm({ id, create, onDone, cancel }: {
         {selection ? <Action label={create ? 'Continue' : 'Review reassignment'} onPress={() => { setError(''); setStep(1); }} testID="assignment-continue" /> : null}
       </> : null}
     </Phase>}
-    <TextAction label="Cancel" disabled={busy} onPress={cancel} />
+    <TextAction label={cancelLabel} disabled={busy} onPress={cancel} />
   </View>;
 }
 
@@ -171,7 +186,7 @@ export function TaskReassignment({ id, onDone }: { id: number; onDone: () => voi
   const [open, setOpen] = useState(false);
   return open ? <Phase shift={14}>
     <Text accessibilityRole="header" style={styles.name}>Reassign task</Text>
-    <TaskAssignmentForm id={id} create={false} cancel={() => setOpen(false)} onDone={() => { setOpen(false); onDone(); }} />
+    <TaskAssignmentForm target={{ kind: 'reassign', id }} cancel={() => setOpen(false)} onDone={() => { setOpen(false); onDone(); }} />
   </Phase> : <TextAction label="Reassign task" testID="open-reassign" onPress={() => setOpen(true)} />;
 }
 

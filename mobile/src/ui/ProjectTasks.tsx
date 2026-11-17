@@ -103,7 +103,7 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
             <Text accessibilityRole="header" style={styles.taskTitle}>Create project task</Text>
           </View>
           <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
-            <TaskAssignmentForm id={id} create cancel={() => setCreating(false)} onDone={(taskId) => {
+            <TaskAssignmentForm target={{ kind: 'project', id }} cancel={() => setCreating(false)} onDone={(taskId) => {
               setCreating(false);
               setInput('');
               setTerm('');
@@ -221,6 +221,8 @@ function TaskDetails({ task, close, onChanged }: { task: AssignedTask; close: ()
           <DetailRecord rows={[
             ['Status', task.status], ['Assignee', task.developer], ['Assigned by', task.assigner], ['Team lead', task.lead],
             ...(task.reference ? [['SCM reference', task.reference]] as const : []),
+            ...(task.function ? [['Function', task.function]] as const : []),
+            ...(task.responsibility ? [['Responsibility', task.responsibility]] as const : []),
             ...(task.priority ? [['Priority', task.priority]] as const : []),
             ...(task.weight ? [['Weight', task.weight + '%']] as const : []),
             ...(task.dateAccess ? [] : [['Start date', task.start], ['Due date', task.due]] as const),

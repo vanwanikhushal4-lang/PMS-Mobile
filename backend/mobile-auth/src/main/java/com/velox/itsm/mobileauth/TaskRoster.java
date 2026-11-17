@@ -21,6 +21,9 @@ final class TaskRoster {
         + " WHERE Customer_name=? AND PRODUCT_SUIT=? AND SECURITY_SOLTION=?"
         + " UNION ALL SELECT Developer, Team_Leader, ImplementerName, 1 AS SUPPORT FROM TlMasterSupport"
         + " WHERE Customer_name=? AND PRODUCT_SUIT=? AND SECURITY_SOLTION=?";
+    private static final String CONTEXT_ROSTER =
+        "SELECT Customer_name,PRODUCT_SUIT,SECURITY_SOLTION,Developer,Team_Leader,ImplementerName,0 AS SUPPORT FROM TlMaster"
+        + " UNION ALL SELECT Customer_name,PRODUCT_SUIT,SECURITY_SOLTION,Developer,Team_Leader,ImplementerName,1 AS SUPPORT FROM TlMasterSupport";
 
     private TaskRoster() {}
 
@@ -37,6 +40,46 @@ final class TaskRoster {
     private static boolean teamLead(Accounts.Account actor) {
         return (role(actor.role, "Developer") || role(actor.role, "Tester") || role(actor.role, "Support"))
             && (role(actor.designation, "Team Leader") || role(actor.designation, "Jr. Team Leader") || role(actor.designation, "Sr Team Leader"));
+    }
+
+    static boolean standaloneProfile(Connection db, Accounts.Account actor) throws SQLException {
+        // The legacy roster names people without an account ID or company.
+        try (PreparedStatement query = db.prepareStatement("SELECT l.LOGINID FROM LOGINMASTER l" + MEMBER
+                + " AND l.LOGINID=? AND NOT EXISTS(SELECT 1 FROM LOGINMASTER d WHERE d.FULL_NAME=l.FULL_NAME AND d.LOGINID<>l.LOGINID)")) {
+            query.setString(1, actor.companyCode);
+            query.setString(2, actor.companyName);
+            query.setInt(3, actor.id);
+            try (ResultSet row = query.executeQuery()) { return row.next(); }
+        }
+    }
+
+    static JSONObject contexts(Connection db, Accounts.Account actor, String term) throws SQLException {
+        JSONArray items = new JSONArray();
+        String sql = "SELECT DISTINCT r.Customer_name,r.PRODUCT_SUIT,r.SECURITY_SOLTION FROM (" + CONTEXT_ROSTER + ") r"
+            + " JOIN LOGINMASTER l ON l.FULL_NAME=r.Developer" + MEMBER
+            + " AND ((r.SUPPORT=1 AND LOWER(l.ROLE_TYPE)='support') OR (r.SUPPORT=0 AND LOWER(l.ROLE_TYPE) IN ('developer','tester')))"
+            + " AND (l.LOGINID=? OR LOWER(r.ImplementerName)=? OR LOWER(r.Team_Leader)=?)"
+            + " AND CHAR_LENGTH(TRIM(r.Customer_name)) BETWEEN 1 AND 240 AND CHAR_LENGTH(TRIM(r.PRODUCT_SUIT)) BETWEEN 1 AND 240"
+            + " AND CHAR_LENGTH(TRIM(r.SECURITY_SOLTION)) BETWEEN 1 AND 240"
+            + " AND LOWER(CONCAT_WS(' ',r.Customer_name,r.PRODUCT_SUIT,r.SECURITY_SOLTION)) LIKE ? ESCAPE '!'"
+            + " ORDER BY r.Customer_name,r.PRODUCT_SUIT,r.SECURITY_SOLTION LIMIT 31";
+        try (PreparedStatement query = db.prepareStatement(sql)) {
+            query.setString(1, actor.companyCode);
+            query.setString(2, actor.companyName);
+            query.setInt(3, actor.id);
+            String name = actor.fullname.toLowerCase(Locale.ROOT);
+            query.setString(4, manager(actor) ? name : null);
+            query.setString(5, teamLead(actor) ? name : null);
+            query.setString(6, "%" + term.toLowerCase(Locale.ROOT).replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%");
+            try (ResultSet rows = query.executeQuery()) {
+                while (rows.next()) {
+                    if (items.length() == 30) return new JSONObject().put("items", items).put("hasMore", true);
+                    items.put(new JSONObject().put("customer", label(rows, "Customer_name"))
+                        .put("suite", label(rows, "PRODUCT_SUIT")).put("tool", label(rows, "SECURITY_SOLTION")));
+                }
+            }
+        }
+        return new JSONObject().put("items", items).put("hasMore", false);
     }
 
     static List<Candidate> forProject(Connection db, Accounts.Account actor, String customer, String suite, String tool) throws SQLException {

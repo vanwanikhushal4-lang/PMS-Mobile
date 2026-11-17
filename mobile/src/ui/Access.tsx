@@ -67,9 +67,12 @@ export function Field({ label, secret = false, ...props }: TextInputProps & { la
   </View>;
 }
 
-export function TextAction({ label, onPress, disabled = false, testID }: { label: string; onPress: () => void; disabled?: boolean; testID?: string }) {
+export function TextAction({ label, onPress, disabled = false, testID, accessibilityLabel }: {
+  label: string; onPress: () => void; disabled?: boolean; testID?: string; accessibilityLabel?: string;
+}) {
   const [focused, setFocused] = useState(false);
-  return <Pressable testID={testID} accessibilityRole="button" accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
+  return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel}
+    accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
     onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
     style={({ pressed }) => [styles.textButton, focused && styles.focused, (pressed || disabled) && styles.dim]}>
     <Text style={styles.textAction}>{label}</Text>

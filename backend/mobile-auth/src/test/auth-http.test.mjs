@@ -357,6 +357,65 @@ await test('profile, projects, tasks and work logs enforce the verified account 
   await assert.rejects(() => client.createTask(many.grant, 100, {
     ...draft, weight: '0.01', requestKey: 'scm-stage-excess-assignment-001',
   }), { code: 'task-weight-limit' });
+
+  assert.equal(many.session.identity.capabilities.includes('tasks.create-standalone'), true);
+  await assert.rejects(() => client.taskContexts(a.grant), { code: 'forbidden' });
+  const catalog = await client.taskContexts(many.grant);
+  assert.deepEqual(catalog.items.map(({ customer }) => customer), ['Harbor Clinic', 'Riverside Works']);
+  assert.ok(catalog.functions.includes('Development'));
+  assert.deepEqual(catalog.responsibilities, ['Velox Solution', 'End Customer']);
+  assert.deepEqual((await client.taskContexts(many.grant, 'device')).items, [catalog.items[0]]);
+  assert.deepEqual((await client.taskContexts(many.grant, '%')).items, []);
+  const context = catalog.items[0];
+  const scope = { context, function: 'Development', responsibility: 'End Customer' };
+  const options = await client.standaloneAssignees(many.grant, context);
+  assert.deepEqual(options.items.map(({ name }) => name), ['Dev Singh', 'Gia Gupta', 'Noor Paul']);
+  assert.ok(recipient.session.identity.capabilities.includes('tasks.create-standalone'));
+  assert.ok(!recipient.session.identity.capabilities.includes('projects.read'));
+  assert.deepEqual((await client.standaloneAssignees(recipient.grant, context)).items.map(({ name }) => name), ['Noor Paul']);
+  await assert.rejects(() => client.createTask(recipient.grant, scope, draft), { code: 'candidate-unavailable' });
+  await assert.rejects(() => client.standaloneAssignees(many.grant, { ...context, customer: 'Other Roster', suite: 'Service Operations',
+    tool: 'Endpoint' }), { code: 'not-found' });
+  await assert.rejects(() => client.standaloneAssignees(b.grant, context), { code: 'forbidden' });
+  const soloDraft = { ...draft, module: 'Inventory endpoint devices', requestKey: 'scm-stage-standalone-assignment-01' };
+  await assert.rejects(() => client.createTask(many.grant, { ...scope, function: 'Unconfigured' }, soloDraft), { code: 'invalid-task-draft' });
+  await assert.rejects(() => client.createTask(many.grant, { ...scope, context: { ...context, tool: 'Unrelated' } }, soloDraft), { code: 'not-found' });
+  const standalone = await client.createTask(many.grant, scope, soloDraft);
+  assert.equal(await client.createTask(many.grant, scope, soloDraft), standalone);
+  await assert.rejects(() => client.createTask(many.grant, { ...scope, responsibility: 'Velox Solution' }, soloDraft), { code: 'task-assignment-conflict' });
+  const solo = (await client.assignedTasks(many.grant)).items.find((task) => task.id === standalone);
+  assert.equal(solo.customer, 'Harbor Clinic');
+  assert.equal(solo.tool, 'Device Security');
+  assert.equal(solo.developer, 'Gia Gupta');
+  assert.equal(solo.function, 'Development');
+  assert.equal(solo.responsibility, 'End Customer');
+  assert.match(solo.reference, /^Harbor Clinic-\d+$/);
+  assert.ok((await client.myTasks(many.grant)).items.some((task) => task.id === standalone));
+  assert.ok(!(await client.projectTasks(many.grant, 100, {})).items.some((task) => task.id === standalone));
+
+  const projectTransfer = await client.assignees(many.grant, taskId, false);
+  const soloTransfer = await client.assignees(many.grant, standalone, false);
+  const changes = [
+    { id: taskId, revision: projectTransfer.revision, candidate: projectTransfer.items.find(({ name }) => name === 'Dev Singh').key },
+    { id: standalone, revision: soloTransfer.revision, candidate: soloTransfer.items.find(({ name }) => name === 'Noor Paul').key },
+  ];
+  await assert.rejects(() => client.reassignTasks(many.grant, [changes[0], { ...changes[1], revision: 'a'.repeat(43) }]),
+    { code: 'task-assignment-conflict', taskId: standalone });
+  assert.equal((await client.assignees(many.grant, taskId, false)).revision, projectTransfer.revision);
+  assert.equal((await client.assignees(many.grant, standalone, false)).revision, soloTransfer.revision);
+  await assert.rejects(() => client.reassignTasks(b.grant, changes), { code: 'not-found', taskId });
+  const duplicate = await fetch(new URL('tasks/assignments/reassign-bulk', base), {
+    method: 'POST', headers: { Authorization: 'Bearer ' + many.grant.sessionToken, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ items: [changes[0], changes[0]] }),
+  });
+  assert.equal(duplicate.status, 400);
+  await client.reassignTasks(many.grant, [...changes].reverse());
+  const afterBatch = (await client.assignmentQueue(many.grant)).items;
+  assert.equal(afterBatch.find((task) => task.id === taskId).developer, 'Dev Singh');
+  assert.equal(afterBatch.find((task) => task.id === taskId).due, '30.11.2026');
+  assert.equal(afterBatch.find((task) => task.id === standalone).developer, 'Noor Paul');
+  assert.equal((await client.myTasks(recipient.grant)).items.find((task) => task.id === standalone).developer, 'Noor Paul');
+  assert.ok(!(await client.myTasks(recipient.grant)).items.some((task) => task.id === taskId));
   await client.signOut(a.grant);
   await assert.rejects(() => client.profile(a.grant), { code: 'expired' });
   await assert.rejects(() => client.projects(a.grant, {}), { code: 'expired' });

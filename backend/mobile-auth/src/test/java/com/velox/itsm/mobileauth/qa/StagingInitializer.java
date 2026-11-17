@@ -185,7 +185,11 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 sql.execute("INSERT INTO TlMaster VALUES ('Dev Singh','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access'),"
                     + " ('Noor Paul','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access'),"
                     + " ('Alex Kim','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access'),"
-                    + " ('Ari Shah','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access')");
+                    + " ('Ari Shah','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access'),"
+                    + " ('Dev Singh','Dev Singh','Gia Gupta','Harbor Clinic','Endpoint Protection','Device Security'),"
+                    + " ('Noor Paul','Dev Singh','Gia Gupta','Harbor Clinic','Endpoint Protection','Device Security'),"
+                    + " ('Ari Shah','Dev Singh','Gia Gupta','Disabled Roster','Service Operations','Email'),"
+                    + " ('Noor Paul','Noor Paul','Maya Sen','Other Roster','Service Operations','Endpoint')");
             }
             AuthService.Directory directory = (company, username, password) -> "QA-A".equals(company) && "directory".equals(username) && "Synthetic-AD-only-22".equals(password);
             AuthService.Delivery deliver = (channel, destination, code) -> {

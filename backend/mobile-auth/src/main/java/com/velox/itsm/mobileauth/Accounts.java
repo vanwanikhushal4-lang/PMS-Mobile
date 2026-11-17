@@ -88,6 +88,18 @@ public final class Accounts {
         }
     }
 
+    JSONObject taskContexts(Account account, String query) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskAssignments.contexts(db, account, query);
+        }
+    }
+
+    JSONObject standaloneOptions(Account account, JSONObject context, String query) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskAssignments.standaloneOptions(db, account, context, query);
+        }
+    }
+
     JSONObject createTask(Account account, JSONObject input, LocalDateTime when) throws SQLException {
         for (int attempt = 0; ; attempt++) {
             try (Connection db = source.getConnection()) {
@@ -103,6 +115,12 @@ public final class Accounts {
     JSONObject reassignTask(Account account, int id, String revision, String candidate) throws SQLException {
         try (Connection db = source.getConnection()) {
             return TaskAssignments.reassign(db, account, id, revision, candidate);
+        }
+    }
+
+    JSONObject reassignTasks(Account account, java.util.Map<Integer, JSONObject> items) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskAssignments.reassignBulk(db, account, items);
         }
     }
 
@@ -196,12 +214,13 @@ public final class Accounts {
                 && ("off".equals(mode) || "sms".equals(mode) || "totp".equals(mode));
         }
         boolean directory() { return "AD".equalsIgnoreCase(kind); }
-        boolean taskWorkspace() { return taskAccess || (projectAccess && TaskRoster.canCreate(this)); }
+        boolean taskWorkspace() { return taskAccess || TaskRoster.canCreate(this); }
         JSONObject identity() {
             JSONArray capabilities = new JSONArray();
             if (projectAccess) capabilities.put("projects.read");
             if (taskWorkspace()) capabilities.put("tasks.assigned-by-me").put("tasks.assigned-to-me");
             if (projectAccess && TaskRoster.canCreate(this)) capabilities.put("tasks.create");
+            if (TaskRoster.canCreate(this)) capabilities.put("tasks.create-standalone");
             return new JSONObject().put("username", username).put("displayName", fullname).put("role", role).put("designation", designation)
                 .put("companyCode", companyCode).put("companyName", companyName).put("capabilities", capabilities);
         }

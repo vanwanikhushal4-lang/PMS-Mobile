@@ -19,7 +19,7 @@ final class AssignedTasks {
     static final String OWNED_HISTORY = SCOPED + MINE + " AND (" + PENDING + " OR t.STATUS='Completed')";
     private static final String TASK_FIELDS = "SELECT t.SR_NO, t.STATUS, t.CUSTOMERNAME, t.PRODUCTSUIT, t.PRODUCTTOOL,"
         + " t.DESCRIPTION, t.MODULE_NAME, t.TEAM_LEADER, t.DEVELOPER_NAME, t.ASSIGNBY, t.START_DATE, t.END_DATE,"
-        + " t.updateDate_Status, t.MANAGER_NAME, t.Task_ID, t.PRIORITY, t.WEIGHTAGE";
+        + " t.updateDate_Status, t.MANAGER_NAME, t.Task_ID, t.PRIORITY, t.WEIGHTAGE, t.FUNCTION_NAME, t.RESPONSIBILITY";
     private static final int LOG_LIMIT = 20;
 
     private AssignedTasks() {}
@@ -130,6 +130,7 @@ final class AssignedTasks {
                     .put("reassignable", !status.isEmpty() && !"Completed".equalsIgnoreCase(status) && TaskAssignments.manages(account, lead, manager))
                     .put("dateAccess", dateAccess).put("dateApproval", dateAccess ? dateApproval : "")
                     .put("reference", label(rows, "Task_ID")).put("priority", label(rows, "PRIORITY")).put("weight", label(rows, "WEIGHTAGE"))
+                    .put("function", label(rows, "FUNCTION_NAME")).put("responsibility", label(rows, "RESPONSIBILITY"))
                     .put("customer", label(rows, "CUSTOMERNAME")).put("suite", label(rows, "PRODUCTSUIT"))
                     .put("tool", label(rows, "PRODUCTTOOL")).put("description", HtmlUtils.htmlUnescape(label(rows, "DESCRIPTION")))
                     .put("lead", lead).put("developer", developer)

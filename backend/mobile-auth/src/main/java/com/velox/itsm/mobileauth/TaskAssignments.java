@@ -7,6 +7,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.springframework.web.util.HtmlUtils;
@@ -16,6 +18,8 @@ final class TaskAssignments {
         + "t.DEVELOPER_NAME,t.TEAM_LEADER,t.MANAGER_NAME,t.updateDate_Status" + AssignedTasks.SCOPED;
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
     private static final String[] DRAFT_TEXT = {"module", "description", "start", "due", "priority", "weight", "candidate", "requestKey"};
+    private static final List<String> FUNCTIONS = java.util.Arrays.asList("Development", "Testing", "POC", "UAT", "Implementation", "Go Live", "Other");
+    private static final List<String> RESPONSIBILITIES = java.util.Arrays.asList("Velox Solution", "End Customer");
     private static final String GRANT = "INSERT INTO scm_mobile_task_access (LOGIN_ID,COMPANY_CODE,TASK_ID) VALUES (?,?,?)"
         + " ON DUPLICATE KEY UPDATE LOGIN_ID=?";
 
@@ -37,7 +41,12 @@ final class TaskAssignments {
     }
 
     static boolean validDraft(JSONObject input) {
-        if (input.length() != 1 + DRAFT_TEXT.length || !AssignedTasks.validId(input.opt("id"))) return false;
+        if (input.has("id")) {
+            if (input.length() != 1 + DRAFT_TEXT.length || !AssignedTasks.validId(input.opt("id"))) return false;
+        } else if (input.length() != 3 + DRAFT_TEXT.length || !validContext(input.optJSONObject("context"))
+                || !FUNCTIONS.contains(input.opt("function")) || !RESPONSIBILITIES.contains(input.opt("responsibility"))) {
+            return false;
+        }
         for (String key : DRAFT_TEXT) if (!(input.opt(key) instanceof String)) return false;
         String module = text(input, "module");
         String description = text(input, "description");
@@ -52,6 +61,29 @@ final class TaskAssignments {
     }
 
     static boolean token(Object value) { return value instanceof String && ((String)value).matches("[A-Za-z0-9_-]{43}"); }
+
+    static boolean validContext(JSONObject context) {
+        if (context == null || context.length() != 3) return false;
+        for (String field : new String[]{"customer", "suite", "tool"}) {
+            if (!(context.opt(field) instanceof String) || text(context, field).isEmpty() || context.getString(field).length() > 240)
+                return false;
+        }
+        return true;
+    }
+
+    static JSONObject contexts(Connection db, Accounts.Account actor, String term) throws SQLException {
+        if (!TaskRoster.standaloneProfile(db, actor)) return null;
+        return TaskRoster.contexts(db, actor, term).put("kind", "task-contexts")
+            .put("functions", new JSONArray(FUNCTIONS)).put("responsibilities", new JSONArray(RESPONSIBILITIES));
+    }
+
+    static JSONObject standaloneOptions(Connection db, Accounts.Account actor, JSONObject context, String term) throws SQLException {
+        if (!TaskRoster.standaloneProfile(db, actor)) return null;
+        List<TaskRoster.Candidate> roster = TaskRoster.forProject(db, actor, text(context, "customer"), text(context, "suite"), text(context, "tool"));
+        if (roster.isEmpty()) return null;
+        return TaskRoster.options(roster, term).put("kind", "task-assignees")
+            .put("id", JSONObject.NULL).put("revision", JSONObject.NULL).put("context", context);
+    }
 
     static JSONObject create(Connection db, Accounts.Account actor, JSONObject input, LocalDateTime when) throws SQLException {
         db.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
@@ -68,19 +100,35 @@ final class TaskAssignments {
     }
 
     private static JSONObject createLocked(Connection db, Accounts.Account actor, JSONObject input, LocalDateTime when) throws SQLException {
-        int projectId = input.getInt("id");
-        JSONObject found = Projects.detail(db, actor, projectId);
-        if (found == null || TaskRoster.profileId(db, actor, actor.fullname) != actor.id) return null;
+        int projectId = input.optInt("id", 0);
+        JSONObject context;
+        String function;
+        String responsibility;
+        if (projectId > 0) {
+            JSONObject found = Projects.detail(db, actor, projectId);
+            if (found == null || TaskRoster.profileId(db, actor, actor.fullname) != actor.id) return null;
+            context = found.getJSONObject("item");
+            function = context.getString("function");
+            responsibility = context.getString("responsibility");
+        } else {
+            if (!TaskRoster.standaloneProfile(db, actor)) return null;
+            context = input.getJSONObject("context");
+            function = text(input, "function");
+            responsibility = text(input, "responsibility");
+        }
+        String customer = text(context, "customer"), suite = text(context, "suite"), tool = text(context, "tool");
         String requestKey = text(input, "requestKey");
         JSONArray normalized = new JSONArray().put(projectId);
+        if (projectId == 0) normalized.put(customer).put(suite).put(tool).put(function).put(responsibility);
         for (String key : DRAFT_TEXT) normalized.put(text(input, key));
         String fingerprint = Secrets.tokenHash(normalized.toString());
         JSONObject receipt = receipt(db, actor, requestKey, fingerprint, projectId);
         if (receipt != null) return receipt;
-        JSONObject project = found.getJSONObject("item");
-        TaskRoster.Candidate assignee = TaskRoster.find(projectRoster(db, actor, project), text(input, "candidate"));
+        List<TaskRoster.Candidate> roster = projectId > 0 ? projectRoster(db, actor, context)
+            : TaskRoster.forProject(db, actor, customer, suite, tool);
+        if (projectId == 0 && roster.isEmpty()) return null;
+        TaskRoster.Candidate assignee = TaskRoster.find(roster, text(input, "candidate"));
         if (assignee == null) return rejected("candidate-unavailable");
-        String customer = project.getString("customer"), tool = project.getString("tool"), function = project.getString("function");
         BigDecimal weight = new BigDecimal(text(input, "weight"));
         String title = HtmlUtils.htmlEscape(text(input, "module"), "UTF-8");
         String description = HtmlUtils.htmlEscape(text(input, "description"), "UTF-8");
@@ -93,18 +141,20 @@ final class TaskAssignments {
                 + " MODULE_NAME,ASSIGNBY,WEIGHTAGE,MANAGER_NAME,TEAM_LEADER,DEVELOPER_NAME,START_DATE,END_DATE,PRIORITY,"
                 + " DESCRIPTION,STATUS,Assign_date,Assign_time) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'Pending',?,?)")) {
             insert.setInt(1, taskId);
-            String[] values = { businessId, function, project.getString("responsibility"), project.getString("suite"), customer, tool,
+            String[] values = { businessId, function, responsibility, suite, customer, tool,
                 title, actor.fullname, weight.toPlainString(), assignee.manager, assignee.lead, assignee.name,
                 legacyDate(input, "start"), legacyDate(input, "due"), text(input, "priority"), description,
                 TaskProgress.date(when), TaskProgress.timestamp(when) };
             for (int i = 0; i < values.length; i++) insert.setString(i + 2, values[i]);
             insert.executeUpdate();
         }
-        try (PreparedStatement link = db.prepareStatement("INSERT INTO scm_mobile_project_task (PROJECT_ID,COMPANY_CODE,TASK_ID) VALUES (?,?,?)")) {
-            link.setInt(1, projectId);
-            link.setString(2, actor.companyCode);
-            link.setInt(3, taskId);
-            link.executeUpdate();
+        if (projectId > 0) {
+            try (PreparedStatement link = db.prepareStatement("INSERT INTO scm_mobile_project_task (PROJECT_ID,COMPANY_CODE,TASK_ID) VALUES (?,?,?)")) {
+                link.setInt(1, projectId);
+                link.setString(2, actor.companyCode);
+                link.setInt(3, taskId);
+                link.executeUpdate();
+            }
         }
         grant(db, actor, taskId, actor.id);
         grant(db, actor, taskId, assignee.id);
@@ -127,6 +177,43 @@ final class TaskAssignments {
             JSONObject result = reassignLocked(db, actor, id, revision, candidateKey);
             db.commit();
             return result;
+        } catch (SQLException | RuntimeException failure) {
+            db.rollback();
+            throw failure;
+        }
+    }
+
+    static boolean validReassignment(JSONObject item) {
+        return item != null && item.length() == 3 && AssignedTasks.validId(item.opt("id"))
+            && token(item.opt("revision")) && token(item.opt("candidate"));
+    }
+
+    static Map<Integer, JSONObject> bulkItems(JSONArray input) {
+        if (input == null || input.length() < 2 || input.length() > 30) return null;
+        Map<Integer, JSONObject> items = new TreeMap<>();
+        for (int index = 0; index < input.length(); index++) {
+            JSONObject item = input.optJSONObject(index);
+            if (!validReassignment(item) || items.put(item.getInt("id"), item) != null) return null;
+        }
+        return items;
+    }
+
+    static JSONObject reassignBulk(Connection db, Accounts.Account actor, Map<Integer, JSONObject> items) throws SQLException {
+        db.setAutoCommit(false);
+        try {
+            JSONArray changed = new JSONArray();
+            for (Map.Entry<Integer, JSONObject> entry : items.entrySet()) {
+                int id = entry.getKey();
+                JSONObject item = entry.getValue();
+                JSONObject result = reassignLocked(db, actor, id, item.getString("revision"), item.getString("candidate"));
+                if (result == null || !"task-reassigned".equals(result.getString("kind"))) {
+                    db.rollback();
+                    return (result == null ? rejected("task-not-found") : result).put("taskId", id);
+                }
+                changed.put(id);
+            }
+            db.commit();
+            return new JSONObject().put("kind", "tasks-reassigned").put("taskIds", changed);
         } catch (SQLException | RuntimeException failure) {
             db.rollback();
             throw failure;
@@ -243,7 +330,7 @@ final class TaskAssignments {
     static JSONObject rejected(String reason) { return new JSONObject().put("kind", "rejected").put("reason", reason); }
 
     private static JSONObject created(int projectId, int taskId) {
-        return new JSONObject().put("kind", "task-created").put("projectId", projectId).put("taskId", taskId);
+        return new JSONObject().put("kind", "task-created").put("projectId", projectId == 0 ? JSONObject.NULL : projectId).put("taskId", taskId);
     }
 
     private static String legacyDate(JSONObject input, String key) {

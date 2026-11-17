@@ -53,7 +53,8 @@ public final class AuthService implements AutoCloseable {
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
             case "tasks/assignments/list": case "tasks/assignments/project-options": case "tasks/assignments/options":
-            case "tasks/assignments/create": case "tasks/assignments/reassign":
+            case "tasks/assignments/create": case "tasks/assignments/reassign": case "tasks/assignments/reassign-bulk":
+            case "tasks/assignments/contexts": case "tasks/assignments/standalone-options": case "tasks/assignments/standalone-create":
                 return session(action, input, bearer, now);
             default: break;
         }
@@ -232,7 +233,8 @@ public final class AuthService implements AutoCloseable {
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
             case "tasks/assignments/list": case "tasks/assignments/project-options": case "tasks/assignments/options":
-            case "tasks/assignments/create": case "tasks/assignments/reassign":
+            case "tasks/assignments/create": case "tasks/assignments/reassign": case "tasks/assignments/reassign-bulk":
+            case "tasks/assignments/contexts": case "tasks/assignments/standalone-options": case "tasks/assignments/standalone-create":
                 result = tasks(action, input, key, account, now);
                 break;
             default: result = reply(200, authenticated(account, item.until));
@@ -269,6 +271,14 @@ public final class AuthService implements AutoCloseable {
     }
 
     private Reply assignments(String action, JSONObject input, Account account, long now) throws SQLException {
+        if ("tasks/assignments/reassign-bulk".equals(action)) {
+            java.util.Map<Integer, JSONObject> items = input.length() == 1 ? TaskAssignments.bulkItems(input.optJSONArray("items")) : null;
+            if (items == null) return rejected(400, "invalid-filter");
+            return assignmentReply(accounts.reassignTasks(account, items), "task-not-found");
+        }
+        if ("tasks/assignments/contexts".equals(action) || action.startsWith("tasks/assignments/standalone-")) {
+            return standaloneAssignments(action, input, account, now);
+        }
         boolean create = "tasks/assignments/create".equals(action);
         boolean projectOptions = "tasks/assignments/project-options".equals(action);
         boolean project = create || projectOptions;
@@ -280,19 +290,41 @@ public final class AuthService implements AutoCloseable {
             if (!TaskAssignments.validDraft(input)) return rejected(400, "invalid-task-draft");
             response = accounts.createTask(account, input, TaskProgress.localTime(now));
         } else if ("tasks/assignments/reassign".equals(action)) {
-            if (input.length() != 3 || !TaskAssignments.token(input.opt("revision")) || !TaskAssignments.token(input.opt("candidate")))
-                return rejected(400, "invalid-filter");
+            if (!TaskAssignments.validReassignment(input)) return rejected(400, "invalid-filter");
             response = accounts.reassignTask(account, id, input.getString("revision"), input.getString("candidate"));
         } else {
-            boolean searching = input.has("query");
-            if (input.length() != (searching ? 2 : 1)
-                    || (searching && (!(input.opt("query") instanceof String) || input.getString("query").length() > 120)))
-                return rejected(400, "invalid-filter");
+            if (!assignmentSearch(input, 1)) return rejected(400, "invalid-filter");
             response = accounts.assignmentOptions(account, id, input.optString("query").trim(), project);
         }
-        if (response == null) return rejected(404, project ? "project-not-found" : "task-not-found");
+        return assignmentReply(response, project ? "project-not-found" : "task-not-found");
+    }
+
+    private Reply standaloneAssignments(String action, JSONObject input, Account account, long now) throws SQLException {
+        if (!TaskRoster.canCreate(account)) return rejected(403, "forbidden");
+        if ("tasks/assignments/contexts".equals(action)) {
+            if (!assignmentSearch(input, 0)) return rejected(400, "invalid-filter");
+            JSONObject response = accounts.taskContexts(account, input.optString("query").trim());
+            return response == null ? rejected(403, "forbidden") : reply(200, response);
+        }
+        if ("tasks/assignments/standalone-create".equals(action)) {
+            if (input.has("id") || !TaskAssignments.validDraft(input)) return rejected(400, "invalid-task-draft");
+            return assignmentReply(accounts.createTask(account, input, TaskProgress.localTime(now)), "context-not-found");
+        }
+        JSONObject context = input.optJSONObject("context");
+        if (!assignmentSearch(input, 1) || !TaskAssignments.validContext(context)) return rejected(400, "invalid-filter");
+        return assignmentReply(accounts.standaloneOptions(account, context, input.optString("query").trim()), "context-not-found");
+    }
+
+    private static boolean assignmentSearch(JSONObject input, int fields) {
+        return input.has("query") ? input.length() == fields + 1
+            && input.opt("query") instanceof String && input.getString("query").length() <= 120 : input.length() == fields;
+    }
+
+    private static Reply assignmentReply(JSONObject response, String missingReason) {
+        if (response == null) return rejected(404, missingReason);
         if ("rejected".equals(response.optString("kind"))) {
-            return reply("invalid-task-draft".equals(response.optString("reason")) ? 400 : 409, response);
+            String reason = response.optString("reason");
+            return reply("invalid-task-draft".equals(reason) ? 400 : "task-not-found".equals(reason) ? 404 : 409, response);
         }
         return reply(200, response);
     }
