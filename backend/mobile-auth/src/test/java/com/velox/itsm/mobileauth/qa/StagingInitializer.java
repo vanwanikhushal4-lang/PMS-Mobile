@@ -125,14 +125,26 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 sql.execute("ALTER TABLE DaywiseTask ADD updateDate_Status VARCHAR(120)");
                 sql.execute("ALTER TABLE DaywiseTask ADD FUNCTION_NAME VARCHAR(120)");
                 sql.execute("ALTER TABLE DaywiseTask ADD TaskUpdateDate VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD MANAGER_NAME VARCHAR(128)");
+                sql.execute("ALTER TABLE DaywiseTask ADD updateStarts_Date VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD updateEnd_Date VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD updateDates_Reason VARCHAR(255)");
+                sql.execute("ALTER TABLE DaywiseTask ADD updateTimeDate VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD updateDateCount VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD dateUpdateBy VARCHAR(128)");
                 sql.execute("INSERT INTO DaywiseTask (SR_NO,STATUS,CUSTOMERNAME,PRODUCTSUIT,PRODUCTTOOL,DESCRIPTION,MODULE_NAME,TEAM_LEADER,DEVELOPER_NAME,START_DATE,END_DATE,ASSIGNBY,updateDate_Status) VALUES"
                     + " (206,'Pending','Riverside Works','Service Operations','VPN Access','Check the second pilot group before rollout.','Pilot acceptance','Dev Singh','Alex Rao','16.11.2026','20.11.2026','Maya Sen','Date Approved'),"
                     + " (207,'Pending','Riverside Works',NULL,NULL,NULL,'Date revision requested',NULL,'Alex Rao',NULL,NULL,'Maya Sen','Date Requested'),"
                     + " (208,'Completed','Riverside Works',NULL,NULL,NULL,'Closed task',NULL,'Alex Rao',NULL,NULL,'Maya Sen',NULL),"
                     + " (209,'Pending','Riverside Works',NULL,NULL,NULL,'Different developer',NULL,'Alex Kim',NULL,NULL,'Maya Sen',NULL),"
                     + " (210,'Pending','Riverside Works','Service Operations','VPN Access','Confirm access for the support team.','Support handoff','Dev Singh','Gia Gupta','16.11.2026','20.11.2026','Maya Sen',NULL),"
-                    + " (211,'Pending','Riverside Works','Service Operations','VPN Access','Fixture for a failed log insert.','Rollback fixture','Dev Singh','Gia Gupta',NULL,NULL,'Maya Sen',NULL)");
-                sql.execute("INSERT INTO scm_mobile_task_access VALUES (1,'QA-A',206), (1,'QA-A',207), (1,'QA-A',208), (1,'QA-A',209), (8,'QA-A',210), (8,'QA-A',211)");
+                    + " (211,'Pending','Riverside Works','Service Operations','VPN Access','Fixture for a failed log insert.','Rollback fixture','Dev Singh','Gia Gupta',NULL,NULL,'Maya Sen',NULL),"
+                    + " (212,'Pending','Riverside Works','Service Operations','VPN Access','Coordinate on-site testing.','Site handoff','Alex Rao','Noor Paul','02.12.2026','07.12.2026','Maya Sen',NULL)");
+                sql.execute("UPDATE DaywiseTask SET MANAGER_NAME='Gia Gupta' WHERE SR_NO IN (206,212)");
+                sql.execute("UPDATE DaywiseTask SET MANAGER_NAME='Alex Rao' WHERE SR_NO=211");
+                sql.execute("INSERT INTO scm_mobile_task_access VALUES (1,'QA-A',206), (1,'QA-A',207), (1,'QA-A',208), (1,'QA-A',209),"
+                    + " (8,'QA-A',210), (8,'QA-A',211), (1,'QA-A',211), (1,'QA-A',212), (8,'QA-A',206), (8,'QA-A',212)");
+                sql.execute("CREATE TABLE ReviseDateHistory (SR_NO INT PRIMARY KEY, TASK_ID VARCHAR(120), START_DATE VARCHAR(120), REVISE_START_DATE VARCHAR(120), END_DATE VARCHAR(120), REVISE_END_DATE VARCHAR(120), APPROVED_DATE VARCHAR(120), APPROVED_BY VARCHAR(128), REVISE_REASON VARCHAR(255), CHECK (TASK_ID <> '211'))");
                 sql.execute("INSERT INTO scm_mobile_project_task VALUES"
                     + " (44,'QA-A',201), (44,'QA-A',202), (44,'QA-A',203), (44,'QA-A',205),"
                     + " (44,'QA-A',206), (44,'QA-B',207), (51,'QA-B',204), (52,'QA-A',201), (100,'QA-A',210)");
@@ -170,6 +182,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
             };
             org.hibernate.cfg.Configuration hibernate = new org.hibernate.cfg.Configuration()
                 .addAnnotatedClass(Class.forName("com.velox.itsm.model.Update_Todays_Progress"))
+                .addAnnotatedClass(Class.forName("com.velox.itsm.model.ReviseDateHistory"))
                 .setProperty(AvailableSettings.DIALECT, "org.hibernate.dialect.MySQLDialect")
                 .setProperty("hibernate.temp.use_jdbc_metadata_defaults", "false");
             hibernate.getProperties().put(AvailableSettings.DATASOURCE, db);

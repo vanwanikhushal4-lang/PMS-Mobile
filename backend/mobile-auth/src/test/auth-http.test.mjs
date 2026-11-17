@@ -236,6 +236,74 @@ await test('profile, projects, tasks and work logs enforce the verified account 
   await assert.rejects(() => client.completeTask(many.grant, 211), { code: 'unavailable' });
   assert.equal((await client.workLog(many.grant, 211)).completed, false);
   assert.deepEqual((await client.myTasks(many.grant)).items.map(({ id }) => id), [211]);
+  const currentDates = await client.taskDates(a.grant, 206);
+  assert.equal(currentDates.requestMode, 'due');
+  assert.equal(currentDates.due, '20.11.2026');
+  await assert.rejects(() => client.taskDates(b.grant, 206), { code: 'not-found' });
+  await assert.rejects(() => client.taskDates(noAccess.grant, 206), { code: 'forbidden' });
+  await assert.rejects(() => client.requestTaskDates(a.grant, 206, { due: '2026-02-29', reason: '' }), { code: 'date-range' });
+  await assert.rejects(() => client.requestTaskDates(a.grant, 206, { due: '12.11.2026', reason: '' }), { code: 'date-range' });
+  await assert.rejects(() => client.requestTaskDates(a.grant, 206, { due: '26.11.2026', reason: '&'.repeat(255) }), { code: 'date-reason-length' });
+  await assert.rejects(() => client.requestTaskDates(a.grant, 206, { start: '20.11.2026', due: '26.11.2026', reason: 'Scope test' }), { code: 'not-found' });
+  const requestReason = 'Pilot follow-up & access checks < 4 hours';
+  const requested = await Promise.allSettled([
+    client.requestTaskDates(a.grant, 206, { due: '2026-11-26', reason: requestReason }),
+    client.requestTaskDates(a.grant, 206, { due: '26.11.2026', reason: requestReason }),
+  ]);
+  assert.equal(requested.filter((item) => item.status === 'fulfilled').length, 1);
+  assert.equal(requested.find((item) => item.status === 'rejected').reason.code, 'date-change-conflict');
+  const awaiting = await client.taskDates(a.grant, 206);
+  assert.equal(awaiting.approval, 'Pending for approval');
+  assert.equal(awaiting.requestedDue, '26.11.2026');
+  assert.equal(awaiting.due, '20.11.2026');
+  assert.equal(awaiting.canApprove, false);
+  assert.equal(awaiting.reason, requestReason);
+  assert.equal((await client.projectTasks(a.grant, 44, {query: 'acceptance'})).items[0].due, '20.11.2026');
+  assert.deepEqual((await client.myTasks(a.grant)).items, []);
+  assert.deepEqual((await client.dateQueue(a.grant, 'mine')).items.map(({ id }) => id), [206]);
+  assert.deepEqual((await client.dateQueue(many.grant, 'review')).items.map(({ id }) => id), [206]);
+  await assert.rejects(() => client.approveTaskDates(a.grant, 206, awaiting.revision), { code: 'not-found' });
+  await assert.rejects(() => client.approveTaskDates(b.grant, 206, awaiting.revision), { code: 'not-found' });
+  await assert.rejects(() => client.approveTaskDates(many.grant, 206, 'a'.repeat(43)), { code: 'date-change-conflict' });
+  assert.equal((await client.taskDates(many.grant, 206)).canApprove, true);
+  const approvals = await Promise.allSettled([
+    client.approveTaskDates(many.grant, 206, awaiting.revision),
+    client.approveTaskDates(many.grant, 206, awaiting.revision),
+  ]);
+  assert.equal(approvals.filter((item) => item.status === 'fulfilled').length, 1);
+  assert.equal(approvals.find((item) => item.status === 'rejected').reason.code, 'date-change-conflict');
+  const confirmedDates = await client.taskDates(a.grant, 206);
+  assert.equal(confirmedDates.due, '26.11.2026');
+  assert.equal(confirmedDates.approval, 'Date Approved');
+  assert.equal(confirmedDates.revision, null);
+  assert.deepEqual(confirmedDates.history.map(({ due, revisedDue, by, reason }) => [due, revisedDue, by, reason]),
+    [['20.11.2026', '26.11.2026', 'Gia Gupta', requestReason]]);
+  assert.deepEqual((await client.myTasks(a.grant)).items.map(({ id }) => id), [206]);
+  assert.equal((await client.projectTasks(a.grant, 44, {query: 'acceptance'})).items[0].due, '26.11.2026');
+  assert.deepEqual((await client.dateQueue(many.grant, 'review')).items, []);
+
+  assert.deepEqual((await client.dateQueue(a.grant, 'team')).items.map(({ id }) => id), [212]);
+  assert.equal((await client.taskDates(a.grant, 212)).requestMode, 'schedule');
+  await assert.rejects(() => client.requestTaskDates(a.grant, 212, { start: '04.12.2026', due: '09.12.2026', reason: '' }), { code: 'date-range' });
+  await client.requestTaskDates(a.grant, 212, { start: '04.12.2026', due: '09.12.2026', reason: 'Site access shifted' });
+  assert.deepEqual((await client.dateQueue(a.grant, 'review')).items, []);
+  const schedule = await client.taskDates(many.grant, 212);
+  assert.equal(schedule.requestedStart, '04.12.2026');
+  await client.approveTaskDates(many.grant, 212, schedule.revision);
+  const revisedSchedule = await client.taskDates(a.grant, 212);
+  assert.equal(revisedSchedule.start, '04.12.2026');
+  assert.equal(revisedSchedule.due, '09.12.2026');
+  assert.equal(revisedSchedule.history[0].start, '02.12.2026');
+  assert.equal(revisedSchedule.history[0].revisedStart, '04.12.2026');
+
+  await client.requestTaskDates(many.grant, 211, { due: '30.11.2026', reason: '' });
+  const rollbackDate = await client.taskDates(a.grant, 211);
+  await assert.rejects(() => client.approveTaskDates(a.grant, 211, rollbackDate.revision), { code: 'unavailable' });
+  const rolledBack = await client.taskDates(a.grant, 211);
+  assert.equal(rolledBack.approval, 'Pending for approval');
+  assert.equal(rolledBack.revision, rollbackDate.revision);
+  assert.equal(rolledBack.due, '');
+  assert.deepEqual(rolledBack.history, []);
   await client.signOut(a.grant);
   await assert.rejects(() => client.profile(a.grant), { code: 'expired' });
   await assert.rejects(() => client.projects(a.grant, {}), { code: 'expired' });

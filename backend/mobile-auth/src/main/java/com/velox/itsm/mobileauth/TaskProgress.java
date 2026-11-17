@@ -33,6 +33,7 @@ final class TaskProgress {
     }
 
     static String date(LocalDateTime now) { return DATE.format(now); }
+    static String timestamp(LocalDateTime now) { return TIMESTAMP.format(now); }
 
     static boolean hasEntry(Connection db, int taskId, String day) throws SQLException {
         try (PreparedStatement query = db.prepareStatement(
@@ -82,7 +83,7 @@ final class TaskProgress {
         if (!completing && hasEntry(db, taskId, day)) return Result.DUPLICATE;
         if (completing) {
             try (PreparedStatement update = db.prepareStatement("UPDATE DaywiseTask SET STATUS='Completed', TaskUpdateDate=? WHERE SR_NO=?")) {
-                update.setString(1, TIMESTAMP.format(now));
+                update.setString(1, timestamp(now));
                 update.setInt(2, taskId);
                 if (update.executeUpdate() != 1) throw new SQLException("SCM task was not updated");
             }
@@ -93,13 +94,7 @@ final class TaskProgress {
     }
 
     private static Object workLogEntry(ClassMetadata mapping, ResultSet task, String name, int id, String note, String day) throws SQLException {
-        Object entry;
-        try {
-            Class<?> entityClass = mapping.getMappedClass();
-            entry = entityClass.getDeclaredConstructor().newInstance();
-        } catch (ReflectiveOperationException failure) {
-            throw new SQLException("SCM work log mapping is unavailable", failure);
-        }
+        Object entry = LegacyRecord.create(mapping);
         boolean completing = note == null;
         mapping.setPropertyValue(entry, "TASK_ID", Integer.toString(id));
         mapping.setPropertyValue(entry, "FUNCTION_NAME", task.getString("FUNCTION_NAME"));

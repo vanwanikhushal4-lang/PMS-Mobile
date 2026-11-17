@@ -7,10 +7,11 @@ module="$root/backend/mobile-auth"
 legacy_lib=${SCM_LEGACY_LIB_DIR:-"$root/.scm-runtime/tomcat/webapps/SCM/WEB-INF/lib"}
 legacy_classes=${SCM_LEGACY_CLASSES_DIR:-"$(dirname "$legacy_lib")/classes"}
 work_log_entity=com/velox/itsm/model/Update_Todays_Progress.class
+date_history_entity=com/velox/itsm/model/ReviseDateHistory.class
 tomcat=${SCM_TOMCAT_HOME:-"$root/.scm-runtime/apache-tomcat-9.0.123"}
 h2=${SCM_H2_JAR:-"$HOME/.m2/repository/com/h2database/h2/2.1.214/h2-2.1.214.jar"}
 [[ -f "$h2" && -f "$tomcat/bin/catalina.sh" && -d "$legacy_lib" ]] || { echo 'Set SCM_H2_JAR, SCM_TOMCAT_HOME, and SCM_LEGACY_LIB_DIR for isolated Java tests' >&2; exit 1; }
-[[ -f "$legacy_classes/$work_log_entity" ]] || { echo 'Set SCM_LEGACY_CLASSES_DIR to the SCM WAR WEB-INF/classes directory' >&2; exit 1; }
+[[ -f "$legacy_classes/$work_log_entity" && -f "$legacy_classes/$date_history_entity" ]] || { echo 'Set SCM_LEGACY_CLASSES_DIR to the SCM WAR WEB-INF/classes directory' >&2; exit 1; }
 mkdir -p "$root/.qa"
 base=$(mktemp -d "$root/.qa/mobile-auth-java.XXXXXX")
 port=${SCM_AUTH_QA_PORT:-8091}
@@ -31,7 +32,7 @@ CONFIG
 war="$base/webapps/scm-auth-qa/WEB-INF"
 find "$module/src/test/java" -name '*.java' -print0 | xargs -0 javac --release 8 -cp "$base/scm-mobile-auth.jar:$legacy_lib/*:$h2" -d "$war/classes"
 cp "$base/scm-mobile-auth.jar" "$h2" "$war/lib/"
-jar cf "$war/lib/scm-test-task-entity.jar" -C "$legacy_classes" "$work_log_entity"
+jar cf "$war/lib/scm-test-task-entity.jar" -C "$legacy_classes" "$work_log_entity" -C "$legacy_classes" "$date_history_entity"
 for dep in spring-{aop,beans,context,core,expression,jdbc,tx,web,webmvc}-4.2.5.RELEASE.jar commons-logging-1.2.jar aopalliance-1.0.jar json-20180813.jar; do
  cp "$legacy_lib/$dep" "$war/lib/"
 done

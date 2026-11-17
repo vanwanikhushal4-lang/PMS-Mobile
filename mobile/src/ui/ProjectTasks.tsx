@@ -7,6 +7,7 @@ import { scheduleLabel, taskSchedule } from '../scm/project-schedule';
 import type { AssignedTask } from '../scm/tasks-contract';
 import { FormMessage, Phase, SearchField, TextAction } from './Access';
 import { Action, DetailRecord, type } from './Primitives';
+import { TaskDatePanel } from './TaskDatePanel';
 import { TaskWorkLog } from './TaskWorkLog';
 import { useReducedMotion } from './motion';
 import { color } from './theme';
@@ -35,7 +36,7 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
   const [term, setTerm] = useState('');
   const [cursors, setCursors] = useState<number[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
-  const [confirmation, setConfirmation] = useState(0);
+  const [confirmation, setConfirmation] = useState('');
   const before = cursors.at(-1);
   const read = useCallback((grant: Grant, signal: AbortSignal) => {
     if (!authClient) return Promise.reject(new AuthError('unavailable'));
@@ -45,7 +46,7 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
   const data = result.kind === 'ready' ? result.data : null;
   const selectedTask = data?.items.find((task) => task.id === selected);
   const open = (task: AssignedTask) => {
-    setConfirmation(0);
+    setConfirmation('');
     setSelected(task.id);
   };
 
@@ -62,7 +63,7 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
     <SearchField label="Search project tasks" placeholder="Task, assignee or status" value={input}
       onChange={setInput} onSubmit={() => search(input)} testID="project-task-search"
       onClear={input || term ? () => { setInput(''); search(''); } : undefined} />
-    {confirmation ? <Phase><Text accessibilityLiveRegion="polite" style={styles.success}>Task T-{confirmation} completed</Text></Phase> : null}
+    {confirmation ? <Phase><Text accessibilityLiveRegion="polite" style={styles.success}>{confirmation}</Text></Phase> : null}
     {result.kind === 'loading' ? <Text accessibilityLiveRegion="polite" style={type.caption}>Loading project tasks…</Text> : null}
     {result.kind === 'error' ? <>
       <FormMessage message={result.code === 'forbidden' || result.code === 'not-found'
@@ -83,11 +84,8 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
         }} /> : null}
       </View> : null}
     </Phase> : null}
-    {selectedTask ? <TaskDetails task={selectedTask} close={() => setSelected(null)} onComplete={() => {
-      setSelected(null);
-      setConfirmation(selectedTask.id);
-      reload();
-    }} /> : null}
+    {selectedTask ? <TaskDetails task={selectedTask} close={() => setSelected(null)}
+      onChanged={(message) => { setSelected(null); setConfirmation(message); reload(); }} /> : null}
   </View>;
 }
 
@@ -172,7 +170,7 @@ function Timeline({ tasks, open }: { tasks: AssignedTask[]; open: (task: Assigne
   </>;
 }
 
-function TaskDetails({ task, close, onComplete }: { task: AssignedTask; close: () => void; onComplete: () => void }) {
+function TaskDetails({ task, close, onChanged }: { task: AssignedTask; close: () => void; onChanged: (message: string) => void }) {
   const reduced = useReducedMotion();
   return <Modal transparent visible animationType={reduced ? 'none' : 'slide'} onRequestClose={close}>
     <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -187,10 +185,12 @@ function TaskDetails({ task, close, onComplete }: { task: AssignedTask; close: (
         </View>
         <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.pane} keyboardShouldPersistTaps="handled">
           {task.description ? <Text style={type.body}>{task.description}</Text> : null}
-          {task.workLog ? <TaskWorkLog id={task.id} onComplete={onComplete} /> : null}
+          {task.dateAccess ? <TaskDatePanel id={task.id}
+            onChanged={(action) => onChanged(action === 'request' ? 'Date request sent' : 'Dates approved')} /> : null}
+          {task.workLog ? <TaskWorkLog id={task.id} onComplete={() => onChanged('Task T-' + task.id + ' completed')} /> : null}
           <DetailRecord rows={[
             ['Status', task.status], ['Assignee', task.developer], ['Assigned by', task.assigner], ['Team lead', task.lead],
-            ['Start date', task.start], ['Due date', task.due],
+            ...(task.dateAccess ? [] : [['Start date', task.start], ['Due date', task.due]] as const),
           ]} />
         </ScrollView>
       </View>

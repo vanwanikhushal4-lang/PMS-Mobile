@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
@@ -92,6 +93,32 @@ public final class Accounts {
             return TaskProgress.apply(db, legacySessions.get(), account, taskId, note, now);
         } catch (RuntimeException failure) {
             throw new SQLException("SCM work log service is unavailable", failure);
+        }
+    }
+
+    JSONObject dateQueue(Account account, int before, String queue) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return AssignedTasks.dateQueue(db, account, before, queue);
+        }
+    }
+
+    JSONObject taskDates(Account account, int taskId) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskDates.detail(db, account, taskId);
+        }
+    }
+
+    TaskDates.Result requestDates(Account account, int taskId, LocalDate start, LocalDate due, String reason, LocalDateTime now) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskDates.request(db, account, taskId, start, due, reason, now);
+        }
+    }
+
+    TaskDates.Result approveDates(Account account, int taskId, String revision, LocalDateTime now) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskDates.approve(db, legacySessions.get(), account, taskId, revision, now);
+        } catch (RuntimeException failure) {
+            throw new SQLException("SCM date approval is unavailable", failure);
         }
     }
 

@@ -1,12 +1,18 @@
 export type AssignedTask = {
   id: number; module: string; status: string; customer: string; suite: string; tool: string;
   description: string; lead: string; developer: string; assigner: string; start: string; due: string;
-  workLog: boolean;
+  workLog: boolean; dateAccess: boolean; dateApproval: string;
 };
 export type AssignedTaskPage = { items: AssignedTask[]; next: number | null };
 export type WorkLog = {
   taskId: number; items: { id: number; date: string; note: string; status: string; author: string }[];
   hasMore: boolean; date: string; completed: boolean; loggedToday: boolean;
+};
+export type DateQueue = 'mine' | 'team' | 'review';
+export type TaskDates = {
+  taskId: number; start: string; due: string; approval: string; requestedStart: string; requestedDue: string; reason: string;
+  revision: string | null; requestMode: 'due' | 'schedule' | 'none'; canApprove: boolean; hasMore: boolean;
+  history: { id: number; start: string; due: string; revisedStart: string; revisedDue: string; approvedAt: string; by: string; reason: string }[];
 };
 
 function object(value: unknown): Record<string, unknown> | null {
@@ -26,16 +32,41 @@ export function decodeAssignedTasks(value: unknown): AssignedTaskPage | null {
   for (const raw of body.items as unknown[]) {
     const row = object(raw);
     if (!row) return null;
-    const { id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due, workLog = false } = row;
+    const { id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due,
+      workLog = false, dateAccess = false, dateApproval = '' } = row;
     const previous = items.at(-1);
     if (!id(number) || (previous && number >= previous.id) || !label(module) || !label(status) || !label(customer)
       || !label(suite) || !label(tool) || typeof description !== 'string' || description.length > 16_384
-      || !label(lead) || !label(developer) || !label(assigner) || !label(start) || !label(due) || typeof workLog !== 'boolean') return null;
-    items.push({ id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due, workLog });
+      || !label(lead) || !label(developer) || !label(assigner) || !label(start) || !label(due) || typeof workLog !== 'boolean'
+      || typeof dateAccess !== 'boolean' || !label(dateApproval)) return null;
+    items.push({ id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due, workLog, dateAccess, dateApproval });
   }
   const next = body.next;
   if (next !== null && (!id(next) || items.length !== 30 || items.at(-1)?.id !== next)) return null;
   return { items, next };
+}
+
+export function decodeTaskDates(value: unknown): TaskDates | null {
+  const body = object(value);
+  if (body?.kind !== 'task-dates' || !id(body.taskId) || typeof body.canApprove !== 'boolean' || typeof body.hasMore !== 'boolean'
+    || !Array.isArray(body.history) || body.history.length > 20 || (body.hasMore && body.history.length !== 20)) return null;
+  const { start, due, approval, requestedStart, requestedDue, reason, revision, requestMode } = body;
+  if (!label(start) || !label(due) || !label(approval) || !label(requestedStart) || !label(requestedDue) || !label(reason)
+    || (revision !== null && (typeof revision !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(revision)))
+    || (body.canApprove && revision === null) || (revision !== null && requestMode !== 'none')
+    || (requestMode !== 'none' && requestMode !== 'due' && requestMode !== 'schedule')) return null;
+  const history: TaskDates['history'] = [];
+  for (const raw of body.history as unknown[]) {
+    const row = object(raw);
+    if (!row) return null;
+    const { id: number, start, due, revisedStart, revisedDue, approvedAt, by, reason } = row;
+    const previous = history.at(-1);
+    if (!id(number) || (previous && number >= previous.id) || !label(start) || !label(due) || !label(revisedStart)
+      || !label(revisedDue) || !label(approvedAt) || !label(by) || !label(reason)) return null;
+    history.push({ id: number, start, due, revisedStart, revisedDue, approvedAt, by, reason });
+  }
+  return { taskId: body.taskId, start, due, approval, requestedStart, requestedDue, reason,
+    revision, requestMode, canApprove: body.canApprove, history, hasMore: body.hasMore };
 }
 
 export function decodeWorkLog(value: unknown): WorkLog | null {

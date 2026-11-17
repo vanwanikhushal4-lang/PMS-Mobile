@@ -17,7 +17,7 @@ final class AssignedTasks {
         + " AND (t.updateDate_Status IS NULL OR t.updateDate_Status='' OR t.updateDate_Status='Date Approved'))";
     static final String OWNED_HISTORY = SCOPED + MINE + " AND (" + PENDING + " OR t.STATUS='Completed')";
     private static final String TASK_FIELDS = "SELECT t.SR_NO, t.STATUS, t.CUSTOMERNAME, t.PRODUCTSUIT, t.PRODUCTTOOL,"
-        + " t.DESCRIPTION, t.MODULE_NAME, t.TEAM_LEADER, t.DEVELOPER_NAME, t.ASSIGNBY, t.START_DATE, t.END_DATE, t.updateDate_Status";
+        + " t.DESCRIPTION, t.MODULE_NAME, t.TEAM_LEADER, t.DEVELOPER_NAME, t.ASSIGNBY, t.START_DATE, t.END_DATE, t.updateDate_Status, t.MANAGER_NAME";
     private static final int LOG_LIMIT = 20;
 
     private AssignedTasks() {}
@@ -40,6 +40,34 @@ final class AssignedTasks {
         try (PreparedStatement query = db.prepareStatement(sql)) {
             bind(query, account);
             if (before != 0) query.setInt(4, before);
+            return page(query, account);
+        }
+    }
+
+    static JSONObject dateQueue(Connection db, Accounts.Account account, int before, String queue) throws SQLException {
+        boolean leadRoute = !TaskDates.managerRoute(account);
+        String reviews = " AND t.STATUS='Pending' AND " + TaskDates.WAITING
+            + " AND COALESCE(t.DEVELOPER_NAME,'')<>? AND COALESCE(t.dateUpdateBy,'')<>?"
+            + " AND (t.MANAGER_NAME=?" + (leadRoute ? " OR (COALESCE(t.updateStarts_Date,'')='' AND t.TEAM_LEADER=?)" : "") + ")";
+        String filter;
+        switch (queue) {
+            case "mine": filter = MINE + " AND t.updateDate_Status IN ('Pending for approval','Date Approved')"; break;
+            case "team":
+                filter = " AND t.TEAM_LEADER=? AND " + PENDING + (leadRoute ? "" : " AND 1=0");
+                break;
+            default: filter = reviews;
+        }
+        String sql = TASK_FIELDS + SCOPED + filter
+            + (before == 0 ? "" : " AND t.SR_NO<?") + " ORDER BY t.SR_NO DESC LIMIT " + (PAGE_SIZE + 1);
+        try (PreparedStatement query = db.prepareStatement(sql)) {
+            bind(query, account);
+            int parameter = 4;
+            if ("review".equals(queue)) {
+                query.setString(parameter++, account.fullname);
+                query.setString(parameter++, account.fullname);
+                if (leadRoute) query.setString(parameter++, account.fullname);
+            }
+            if (before != 0) query.setInt(parameter, before);
             return page(query, account);
         }
     }
@@ -85,13 +113,18 @@ final class AssignedTasks {
                 String status = label(rows, "STATUS");
                 String developer = label(rows, "DEVELOPER_NAME");
                 String dateApproval = label(rows, "updateDate_Status");
+                String lead = label(rows, "TEAM_LEADER");
+                String manager = label(rows, "MANAGER_NAME");
+                boolean dateAccess = account.fullname.equalsIgnoreCase(developer) || account.fullname.equalsIgnoreCase(lead)
+                    || account.fullname.equalsIgnoreCase(manager);
                 boolean history = account.fullname.equalsIgnoreCase(developer) && ("Completed".equalsIgnoreCase(status)
                     || ("Pending".equalsIgnoreCase(status) && (dateApproval.isEmpty() || "Date Approved".equalsIgnoreCase(dateApproval))));
                 items.put(new JSONObject().put("id", last)
                     .put("module", label(rows, "MODULE_NAME")).put("status", status).put("workLog", history)
+                    .put("dateAccess", dateAccess).put("dateApproval", dateAccess ? dateApproval : "")
                     .put("customer", label(rows, "CUSTOMERNAME")).put("suite", label(rows, "PRODUCTSUIT"))
                     .put("tool", label(rows, "PRODUCTTOOL")).put("description", label(rows, "DESCRIPTION"))
-                    .put("lead", label(rows, "TEAM_LEADER")).put("developer", developer)
+                    .put("lead", lead).put("developer", developer)
                     .put("assigner", label(rows, "ASSIGNBY")).put("start", label(rows, "START_DATE")).put("due", label(rows, "END_DATE")));
             }
             Object next = items.length() == PAGE_SIZE && rows.next() ? last : JSONObject.NULL;

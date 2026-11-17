@@ -3,6 +3,7 @@ package com.velox.itsm.mobileauth;
 import com.velox.itsm.mobileauth.Accounts.Account;
 import java.security.MessageDigest;
 import java.sql.SQLException;
+import java.time.LocalDate;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Locale;
@@ -50,6 +51,7 @@ public final class AuthService implements AutoCloseable {
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
+            case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
                 return session(action, input, bearer, now);
             default: break;
         }
@@ -226,6 +228,7 @@ public final class AuthService implements AutoCloseable {
                 break;
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
+            case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
                 result = tasks(action, input, key, account, now);
                 break;
             default: result = reply(200, authenticated(account, item.until));
@@ -245,6 +248,7 @@ public final class AuthService implements AutoCloseable {
     private Reply tasks(String action, JSONObject input, String key, Account account, long now) throws SQLException {
         if (!account.taskAccess) return rejected(403, "forbidden");
         if (!take("tasks/" + key, 100, now)) return rejected(429, "rate-limited");
+        if (action.startsWith("tasks/dates/")) return dates(action, input, account, now);
         if ("tasks/work-log".equals(action)) {
             if (input.length() != 1 || !AssignedTasks.validId(input.opt("id"))) return rejected(400, "invalid-filter");
             JSONObject log = accounts.workLog(account, input.getInt("id"), TaskProgress.date(TaskProgress.localTime(now)));
@@ -257,6 +261,49 @@ public final class AuthService implements AutoCloseable {
             before = input.getInt("before");
         }
         return reply(200, accounts.assignedTasks(account, before, action));
+    }
+
+    private Reply dates(String action, JSONObject input, Account account, long now) throws SQLException {
+        if ("tasks/dates/list".equals(action)) {
+            String queue = string(input, "queue", 8);
+            boolean paging = input.has("before");
+            if (!("mine".equals(queue) || "team".equals(queue) || "review".equals(queue)) || input.length() != (paging ? 2 : 1)
+                || (paging && !AssignedTasks.validId(input.opt("before")))) return rejected(400, "invalid-filter");
+            return reply(200, accounts.dateQueue(account, input.optInt("before"), queue));
+        }
+        if (!AssignedTasks.validId(input.opt("id"))) return rejected(400, "invalid-filter");
+        int id = input.getInt("id");
+        if ("tasks/dates/detail".equals(action)) {
+            if (input.length() != 1) return rejected(400, "invalid-filter");
+            JSONObject dates = accounts.taskDates(account, id);
+            return dates == null ? rejected(404, "task-not-found") : reply(200, dates);
+        }
+        boolean approve = "tasks/dates/approve".equals(action);
+        TaskDates.Result result;
+        if (approve) {
+            String revision = string(input, "revision", 43);
+            if (input.length() != 2 || !revision.matches("[A-Za-z0-9_-]{43}")) return rejected(400, "invalid-filter");
+            result = accounts.approveDates(account, id, revision, TaskProgress.localTime(now));
+        } else {
+            for (String key : input.keySet()) {
+                if (!("id".equals(key) || "start".equals(key) || "due".equals(key) || "reason".equals(key))) return rejected(400, "invalid-filter");
+            }
+            LocalDate due = TaskDates.parse(string(input, "due", 10));
+            LocalDate start = TaskDates.parse(string(input, "start", 10));
+            String reason = TaskDates.encodeReason(string(input, "reason", 255).trim());
+            if (due == null || (input.has("start") && start == null)) return rejected(400, "date-range");
+            if (input.has("reason") && (!(input.opt("reason") instanceof String) || input.getString("reason").length() > 255))
+                return rejected(400, "invalid-filter");
+            if (reason.length() > 255) return rejected(400, "date-reason-length");
+            result = accounts.requestDates(account, id, start, due, reason, TaskProgress.localTime(now));
+        }
+        switch (result) {
+            case MISSING: return rejected(404, "task-not-found");
+            case CHANGED: return rejected(409, "date-change-conflict");
+            case INVALID_RANGE: return rejected(400, "date-range");
+            case NO_REVIEWER: return rejected(409, "date-no-reviewer");
+            default: return reply(200, new JSONObject().put("kind", approve ? "task-dates-approved" : "task-dates-requested").put("taskId", id));
+        }
     }
 
     private Reply updateTask(String action, JSONObject input, Account account, long now) throws SQLException {
