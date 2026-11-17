@@ -4,11 +4,14 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
+import java.util.function.Supplier;
 import javax.sql.DataSource;
+import org.hibernate.SessionFactory;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
-/** Legacy identity is read-only. All writes go to the explicitly provisioned mobile table. */
+/** Legacy identity is read-only. Task writes use the shared SCM mapping and the scoped connection. */
 public final class Accounts {
     private static final String READ = "SELECT l.LOGINID, l.USERNAME, l.FULL_NAME, l.ROLE_TYPE, l.DESIGNATION, l.LOGIN_TYPE, l.EMAIL, l.PHONE,"
         + " c.COMPANY_CODE, c.COMPANY_NAME, m.PASSWORD_HASH, m.MFA_MODE, m.TOTP_ENCRYPTED, m.REVISION,"
@@ -18,8 +21,12 @@ public final class Accounts {
         + " JOIN company_code_master c ON c.COMPANY_CODE=m.COMPANY_CODE AND c.COMPANY_NAME=l.COMPANY"
         + " WHERE m.ENABLED=TRUE AND ";
     private final DataSource source;
+    private final Supplier<SessionFactory> legacySessions;
 
-    public Accounts(DataSource source) { this.source = source; }
+    public Accounts(DataSource source, Supplier<SessionFactory> legacySessions) {
+        this.source = source;
+        this.legacySessions = legacySessions;
+    }
 
     Account find(String company, String username) throws SQLException {
         try (Connection db = source.getConnection(); PreparedStatement statement = db.prepareStatement(READ + "c.COMPANY_CODE=? AND l.USERNAME=?")) {
@@ -68,15 +75,23 @@ public final class Accounts {
         }
     }
 
-    JSONObject assignedTasks(Account account, int before, boolean incoming) throws SQLException {
+    JSONObject assignedTasks(Account account, int before, String action) throws SQLException {
         try (Connection db = source.getConnection()) {
-            return AssignedTasks.read(db, account, before, incoming);
+            return AssignedTasks.read(db, account, before, action);
         }
     }
 
-    JSONObject workLog(Account account, int taskId) throws SQLException {
+    JSONObject workLog(Account account, int taskId, String today) throws SQLException {
         try (Connection db = source.getConnection()) {
-            return AssignedTasks.workLog(db, account, taskId);
+            return AssignedTasks.workLog(db, account, taskId, today);
+        }
+    }
+
+    TaskProgress.Result updateTask(Account account, int taskId, String note, LocalDateTime now) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskProgress.apply(db, legacySessions.get(), account, taskId, note, now);
+        } catch (RuntimeException failure) {
+            throw new SQLException("SCM work log service is unavailable", failure);
         }
     }
 

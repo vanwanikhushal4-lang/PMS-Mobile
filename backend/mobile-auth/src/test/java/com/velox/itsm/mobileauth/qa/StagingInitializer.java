@@ -20,6 +20,8 @@ import java.util.function.LongSupplier;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
 import org.h2.jdbcx.JdbcDataSource;
+import org.hibernate.SessionFactory;
+import org.hibernate.cfg.AvailableSettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
@@ -121,20 +123,31 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " (205,'Pending','Valley Logistics',NULL,NULL,'Grant belongs to another company.','Other company',NULL,NULL,NULL,NULL,'Alex Rao')");
                 sql.execute("INSERT INTO scm_mobile_task_access VALUES (1,'QA-A',201), (1,'QA-A',202), (1,'QA-A',203), (2,'QA-B',204), (1,'QA-B',205)");
                 sql.execute("ALTER TABLE DaywiseTask ADD updateDate_Status VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD FUNCTION_NAME VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD TaskUpdateDate VARCHAR(120)");
                 sql.execute("INSERT INTO DaywiseTask (SR_NO,STATUS,CUSTOMERNAME,PRODUCTSUIT,PRODUCTTOOL,DESCRIPTION,MODULE_NAME,TEAM_LEADER,DEVELOPER_NAME,START_DATE,END_DATE,ASSIGNBY,updateDate_Status) VALUES"
                     + " (206,'Pending','Riverside Works','Service Operations','VPN Access','Check the second pilot group before rollout.','Pilot acceptance','Dev Singh','Alex Rao','16.11.2026','20.11.2026','Maya Sen','Date Approved'),"
                     + " (207,'Pending','Riverside Works',NULL,NULL,NULL,'Date revision requested',NULL,'Alex Rao',NULL,NULL,'Maya Sen','Date Requested'),"
                     + " (208,'Completed','Riverside Works',NULL,NULL,NULL,'Closed task',NULL,'Alex Rao',NULL,NULL,'Maya Sen',NULL),"
-                    + " (209,'Pending','Riverside Works',NULL,NULL,NULL,'Different developer',NULL,'Alex Kim',NULL,NULL,'Maya Sen',NULL)");
-                sql.execute("INSERT INTO scm_mobile_task_access VALUES (1,'QA-A',206), (1,'QA-A',207), (1,'QA-A',208), (1,'QA-A',209)");
+                    + " (209,'Pending','Riverside Works',NULL,NULL,NULL,'Different developer',NULL,'Alex Kim',NULL,NULL,'Maya Sen',NULL),"
+                    + " (210,'Pending','Riverside Works','Service Operations','VPN Access','Confirm access for the support team.','Support handoff','Dev Singh','Gia Gupta','16.11.2026','20.11.2026','Maya Sen',NULL),"
+                    + " (211,'Pending','Riverside Works','Service Operations','VPN Access','Fixture for a failed log insert.','Rollback fixture','Dev Singh','Gia Gupta',NULL,NULL,'Maya Sen',NULL)");
+                sql.execute("INSERT INTO scm_mobile_task_access VALUES (1,'QA-A',206), (1,'QA-A',207), (1,'QA-A',208), (1,'QA-A',209), (8,'QA-A',210), (8,'QA-A',211)");
                 sql.execute("INSERT INTO scm_mobile_project_task VALUES"
                     + " (44,'QA-A',201), (44,'QA-A',202), (44,'QA-A',203), (44,'QA-A',205),"
-                    + " (44,'QA-A',206), (44,'QA-B',207), (51,'QA-B',204), (52,'QA-A',201)");
-                sql.execute("CREATE TABLE Update_Todays_Progress (SR_NO INT PRIMARY KEY, TASK_ID VARCHAR(120), DATE VARCHAR(120), TODAYS_PROGRESS VARCHAR(2000), STATUS VARCHAR(120), FULL_NAME VARCHAR(120), TASK_TYPE VARCHAR(120))");
-                sql.execute("INSERT INTO Update_Todays_Progress VALUES"
+                    + " (44,'QA-A',206), (44,'QA-B',207), (51,'QA-B',204), (52,'QA-A',201), (100,'QA-A',210)");
+                sql.execute("CREATE TABLE Update_Todays_Progress (SR_NO INT PRIMARY KEY, TASK_ID VARCHAR(120), DATE VARCHAR(120), TODAYS_PROGRESS VARCHAR(255), STATUS VARCHAR(120), FULL_NAME VARCHAR(120), TASK_TYPE VARCHAR(120), FUNCTION_NAME VARCHAR(120), MODULE_NAME VARCHAR(120), CUSTOMER_NAME VARCHAR(120), PRODUCT_NAME VARCHAR(120), PRODUCT_SUITE VARCHAR(120), TASK_DESC VARCHAR(2000))");
+                sql.execute("CREATE TABLE hibernate_sequence (next_val BIGINT)");
+                sql.execute("INSERT INTO hibernate_sequence VALUES (1000)");
+                sql.execute("ALTER TABLE Update_Todays_Progress ADD CHECK (TASK_ID <> '211' OR STATUS <> 'Completed')");
+                sql.execute("INSERT INTO Update_Todays_Progress (SR_NO,TASK_ID,DATE,TODAYS_PROGRESS,STATUS,FULL_NAME,TASK_TYPE) VALUES"
                     + " (301,'206','16.11.2026','Verified pilot accounts and recorded rollout exceptions.','In-Progress','Alex Rao','General'),"
                     + " (302,'206','16.11.2026','Other workflow using the same task reference.','In-Progress','Maya Sen','RFP'),"
                     + " (303,'204','16.11.2026','Other company work log.','In-Progress','Alex Kim','General')");
+                try (InputStream stream = QA.class.getResourceAsStream("/var/schema-task-progress.sql");
+                     Scanner schema = new Scanner(stream, "UTF-8").useDelimiter("\\A")) {
+                    for (String statement : schema.next().split(";")) if (!statement.trim().isEmpty()) sql.execute(statement);
+                }
                 try (PreparedStatement project = connection.prepareStatement("INSERT INTO ProjectData (SR_NO, PROJECTNAME) VALUES (?, 'Paging test project')");
                      PreparedStatement access = connection.prepareStatement("INSERT INTO scm_mobile_project_access VALUES (8,'QA-A',?)")) {
                     for (int id = 100; id < 133; id++) {
@@ -155,7 +168,13 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     }
                 } catch (java.io.IOException e) { throw new AuthService.Unavailable(); }
             };
-            return new AuthService(new Accounts(db), secrets, directory, deliver, clock);
+            org.hibernate.cfg.Configuration hibernate = new org.hibernate.cfg.Configuration()
+                .addAnnotatedClass(Class.forName("com.velox.itsm.model.Update_Todays_Progress"))
+                .setProperty(AvailableSettings.DIALECT, "org.hibernate.dialect.MySQLDialect")
+                .setProperty("hibernate.temp.use_jdbc_metadata_defaults", "false");
+            hibernate.getProperties().put(AvailableSettings.DATASOURCE, db);
+            SessionFactory sessions = hibernate.buildSessionFactory();
+            return new AuthService(new Accounts(db, () -> sessions), secrets, directory, deliver, clock);
         }
 
         @Bean public AuthController stageController(AuthService auth) { return new LoopbackController(auth); }

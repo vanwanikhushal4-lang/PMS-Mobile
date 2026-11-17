@@ -184,7 +184,11 @@ await test('profile, projects, tasks and work logs enforce the verified account 
   assert.deepEqual((await client.assignedTasks(b.grant)).items.map(({ id }) => id), [204]);
   assert.equal((await client.assignedTasks(a.grant)).items[1].developer, 'Noor Paul');
   assert.deepEqual((await client.myTasks(a.grant)).items.map(({ id }) => id), [206]);
-  assert.deepEqual(await client.workLog(a.grant, 206), {
+  const { date, completed, loggedToday, ...history } = await client.workLog(a.grant, 206);
+  assert.match(date, /^\d{2}\.\d{2}\.\d{4}$/);
+  assert.equal(completed, false);
+  assert.equal(loggedToday, date === '16.11.2026');
+  assert.deepEqual(history, {
     taskId: 206, hasMore: false, items: [
       { id: 301, date: '16.11.2026', note: 'Verified pilot accounts and recorded rollout exceptions.', status: 'In-Progress', author: 'Alex Rao' },
     ],
@@ -200,6 +204,38 @@ await test('profile, projects, tasks and work logs enforce the verified account 
   const second = await client.projects(many.grant, { before: first.next });
   assert.deepEqual(second.items.map(({ id }) => id), [102, 101, 100]);
   assert.equal(second.next, null);
+  assert.equal((await client.workLog(many.grant, 210)).loggedToday, false);
+  await assert.rejects(() => client.logProgress(b.grant, 210, 'Outside the company'), { code: 'not-found' });
+  await assert.rejects(() => client.completeTask(a.grant, 210), { code: 'not-found' });
+  await assert.rejects(() => client.completeTask(a.grant, 201), { code: 'not-found' });
+  await assert.rejects(() => client.completeTask(a.grant, 207), { code: 'not-found' });
+  assert.equal((await fetch(`${base}tasks/progress`, request({ id: 206, note: ' ', date }))).status, 400);
+  assert.equal((await fetch(`${base}tasks/progress`, request({ id: 206, note: ' '.repeat(256) }))).status, 400);
+  const logs = await Promise.allSettled([
+    client.logProgress(many.grant, 210, 'Tested support access & confirmed the handoff.'),
+    client.logProgress(many.grant, 210, 'Concurrent progress note.'),
+  ]);
+  assert.equal(logs.filter((item) => item.status === 'fulfilled').length, 1);
+  assert.equal(logs.find((item) => item.status === 'rejected').reason.code, 'progress-already-logged');
+  const progress = await client.workLog(many.grant, 210);
+  assert.equal(progress.loggedToday, true);
+  assert.equal(progress.items.length, 1);
+  assert.equal(progress.items[0].note, logs[0].status === 'fulfilled' ? 'Tested support access & confirmed the handoff.' : 'Concurrent progress note.');
+  assert.equal(progress.items[0].author, 'Gia Gupta');
+  assert.equal(progress.items[0].status, 'In-Progress');
+  assert.ok(progress.items[0].id >= 1000);
+  await Promise.all([client.completeTask(many.grant, 210), client.completeTask(many.grant, 210)]);
+  const closed = await client.workLog(many.grant, 210);
+  assert.equal(closed.completed, true);
+  assert.deepEqual(closed.items.map(({ status }) => status), ['Completed', 'In-Progress']);
+  assert.deepEqual((await client.completedTasks(many.grant)).items.map(({ id }) => id), [210]);
+  const board = (await client.projectTasks(many.grant, 100, {})).items;
+  assert.deepEqual(board.map(({ id, status, workLog }) => [id, status, workLog]), [[210, 'Completed', true]]);
+  assert.deepEqual((await client.myTasks(many.grant)).items.map(({ id }) => id), [211]);
+  await assert.rejects(() => client.logProgress(many.grant, 210, 'After completion'), { code: 'task-closed' });
+  await assert.rejects(() => client.completeTask(many.grant, 211), { code: 'unavailable' });
+  assert.equal((await client.workLog(many.grant, 211)).completed, false);
+  assert.deepEqual((await client.myTasks(many.grant)).items.map(({ id }) => id), [211]);
   await client.signOut(a.grant);
   await assert.rejects(() => client.profile(a.grant), { code: 'expired' });
   await assert.rejects(() => client.projects(a.grant, {}), { code: 'expired' });

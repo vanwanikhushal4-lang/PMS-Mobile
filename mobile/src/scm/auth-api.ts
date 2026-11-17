@@ -29,7 +29,7 @@ export function resolveAuthConfig(value: string | undefined, allowFixture = fals
 }
 
 export class AuthError extends Error {
-  readonly code: 'transport' | 'bad-response' | 'expired' | 'unavailable' | 'forbidden' | 'not-found';
+  readonly code: 'transport' | 'bad-response' | 'expired' | 'unavailable' | 'forbidden' | 'not-found' | 'progress-already-logged' | 'task-closed';
   constructor(code: AuthError['code']) { super(code); this.name = 'AuthError'; this.code = code; }
 }
 
@@ -74,7 +74,7 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
   async function request(path: string, body: object | undefined, signal?: AbortSignal, token?: string) {
     const url = new URL(path, config.url);
     const missingReason = ['projects/detail', 'projects/records', 'projects/tasks', 'projects/favorite'].includes(path) ? 'project-not-found'
-      : path === 'tasks/work-log' ? 'task-not-found' : null;
+      : ['tasks/work-log', 'tasks/progress', 'tasks/complete'].includes(path) ? 'task-not-found' : null;
     const abort = new AbortController();
     const cancel = () => abort.abort();
     signal?.addEventListener('abort', cancel, { once: true });
@@ -100,6 +100,10 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       if (response.status === 429) return { kind: 'rejected', reason: 'rate-limited' };
       if (!response.headers.get('content-type')?.toLowerCase().startsWith('application/json')) throw new AuthError('bad-response');
       const data = await response.json().catch(() => { throw new AuthError('bad-response'); });
+      if (path === 'tasks/progress' && response.status === 409) {
+        const { kind, reason } = jsonObject(data);
+        if (kind === 'rejected' && (reason === 'progress-already-logged' || reason === 'task-closed')) throw new AuthError(reason);
+      }
       if (missingReason && response.status === 404 && jsonObject(data).reason === missingReason) {
         throw new AuthError('not-found');
       }
@@ -164,10 +168,23 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       if (!data) throw new AuthError('bad-response');
       return data;
     },
+    completedTasks: async (grant: Grant, before?: number, signal?: AbortSignal) => {
+      const data = decodeAssignedTasks(await request('tasks/completed', { before }, signal, grant.sessionToken));
+      if (!data) throw new AuthError('bad-response');
+      return data;
+    },
     workLog: async (grant: Grant, id: number, signal?: AbortSignal) => {
       const data = decodeWorkLog(await request('tasks/work-log', { id }, signal, grant.sessionToken));
       if (!data || data.taskId !== id) throw new AuthError('bad-response');
       return data;
+    },
+    logProgress: async (grant: Grant, id: number, note: string, signal?: AbortSignal) => {
+      const data = jsonObject(await request('tasks/progress', { id, note }, signal, grant.sessionToken));
+      if (data.kind !== 'task-progress-saved' || data.taskId !== id) throw new AuthError('bad-response');
+    },
+    completeTask: async (grant: Grant, id: number, signal?: AbortSignal) => {
+      const data = jsonObject(await request('tasks/complete', { id }, signal, grant.sessionToken));
+      if (data.kind !== 'task-completed' || data.taskId !== id) throw new AuthError('bad-response');
     },
     signOut: async (grant: Grant, signal?: AbortSignal) => { await request('sign-out', {}, signal, grant.sessionToken); },
     startRecovery: async (details: { companyCode: string; username: string; channel: 'email' | 'sms' }, signal?: AbortSignal) => decodeRecovery(await request('recovery/start', details, signal)),

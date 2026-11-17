@@ -1,9 +1,13 @@
 export type AssignedTask = {
   id: number; module: string; status: string; customer: string; suite: string; tool: string;
   description: string; lead: string; developer: string; assigner: string; start: string; due: string;
+  workLog: boolean;
 };
 export type AssignedTaskPage = { items: AssignedTask[]; next: number | null };
-export type WorkLog = { taskId: number; items: { id: number; date: string; note: string; status: string; author: string }[]; hasMore: boolean };
+export type WorkLog = {
+  taskId: number; items: { id: number; date: string; note: string; status: string; author: string }[];
+  hasMore: boolean; date: string; completed: boolean; loggedToday: boolean;
+};
 
 function object(value: unknown): Record<string, unknown> | null {
   return typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -22,12 +26,12 @@ export function decodeAssignedTasks(value: unknown): AssignedTaskPage | null {
   for (const raw of body.items as unknown[]) {
     const row = object(raw);
     if (!row) return null;
-    const { id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due } = row;
+    const { id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due, workLog = false } = row;
     const previous = items.at(-1);
     if (!id(number) || (previous && number >= previous.id) || !label(module) || !label(status) || !label(customer)
       || !label(suite) || !label(tool) || typeof description !== 'string' || description.length > 16_384
-      || !label(lead) || !label(developer) || !label(assigner) || !label(start) || !label(due)) return null;
-    items.push({ id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due });
+      || !label(lead) || !label(developer) || !label(assigner) || !label(start) || !label(due) || typeof workLog !== 'boolean') return null;
+    items.push({ id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due, workLog });
   }
   const next = body.next;
   if (next !== null && (!id(next) || items.length !== 30 || items.at(-1)?.id !== next)) return null;
@@ -37,6 +41,8 @@ export function decodeAssignedTasks(value: unknown): AssignedTaskPage | null {
 export function decodeWorkLog(value: unknown): WorkLog | null {
   const body = object(value);
   if (body?.kind !== 'task-work-log' || !id(body.taskId) || typeof body.hasMore !== 'boolean'
+    || typeof body.date !== 'string' || !/^\d{2}\.\d{2}\.\d{4}$/.test(body.date)
+    || typeof body.completed !== 'boolean' || typeof body.loggedToday !== 'boolean' || (body.completed && body.loggedToday)
     || !Array.isArray(body.items) || body.items.length > 20 || (body.hasMore && body.items.length !== 20)) return null;
   const items: WorkLog['items'] = [];
   for (const raw of body.items as unknown[]) {
@@ -48,5 +54,5 @@ export function decodeWorkLog(value: unknown): WorkLog | null {
       || typeof note !== 'string' || note.length > 16_384) return null;
     items.push({ id: number, date, note, status, author });
   }
-  return { taskId: body.taskId, items, hasMore: body.hasMore };
+  return { taskId: body.taskId, items, hasMore: body.hasMore, date: body.date, completed: body.completed, loggedToday: body.loggedToday };
 }

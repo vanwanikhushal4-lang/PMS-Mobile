@@ -4,6 +4,8 @@ import java.net.URI;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Properties;
+import org.hibernate.SessionFactory;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Profile;
@@ -14,13 +16,13 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 @Profile("scm-mobile-auth")
 public class AuthConfiguration {
     @Bean(destroyMethod = "close")
-    public AuthService mobileAuthService(Environment env) {
+    public AuthService mobileAuthService(Environment env, ApplicationContext context) {
         byte[] key;
         try { key = Base64.getDecoder().decode(env.getProperty("SCM_MOBILE_AUTH_KEY", "")); }
         catch (IllegalArgumentException e) { throw new IllegalArgumentException("Invalid mobile auth key configuration"); }
         try {
             Secrets secrets = new Secrets(key);
-            return new AuthService(new Accounts(mobileDataSource(env)), secrets,
+            return new AuthService(new Accounts(mobileDataSource(env), () -> context.getBean(SessionFactory.class)), secrets,
                 Integrations.directory(env.getProperty("SCM_MOBILE_AUTH_AD_URL"), env.getProperty("SCM_MOBILE_AUTH_AD_COMPANY"), env.getProperty("SCM_MOBILE_AUTH_AD_REALM")),
                 Integrations.delivery(env.getProperty("SCM_MOBILE_AUTH_DELIVERY_URL"), env.getProperty("SCM_MOBILE_AUTH_DELIVERY_BEARER")),
                 System::currentTimeMillis);

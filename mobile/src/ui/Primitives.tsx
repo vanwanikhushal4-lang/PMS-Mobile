@@ -39,7 +39,7 @@ export function Screen({ children, keyboard = false, workspace = false }: PropsW
 }
 
 export function Action({ label, onPress, icon = 'arrow', secondary = false, busy = false, testID }: {
-  label: string; onPress: () => void; icon?: 'arrow' | 'back' | 'refresh' | 'lock' | 'exit'; secondary?: boolean; busy?: boolean; testID?: string;
+  label: string; onPress: () => void; icon?: 'arrow' | 'back' | 'refresh' | 'lock' | 'exit' | 'check'; secondary?: boolean; busy?: boolean; testID?: string;
 }) {
   const reduced = useReducedMotion();
   const [scale] = useState(() => new Animated.Value(1));

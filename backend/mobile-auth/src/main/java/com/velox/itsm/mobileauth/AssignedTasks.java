@@ -10,12 +10,14 @@ import org.json.JSONObject;
 
 final class AssignedTasks {
     private static final int PAGE_SIZE = 30;
-    private static final String SCOPED =
+    static final String SCOPED =
         " FROM scm_mobile_task_access a JOIN DaywiseTask t ON t.SR_NO=a.TASK_ID WHERE a.LOGIN_ID=? AND a.COMPANY_CODE=?";
-    private static final String OPEN = " AND t.DEVELOPER_NAME=? AND t.STATUS='Pending'"
-        + " AND (t.updateDate_Status IS NULL OR t.updateDate_Status='' OR t.updateDate_Status='Date Approved')";
+    private static final String MINE = " AND t.DEVELOPER_NAME=?";
+    static final String PENDING = "(t.STATUS='Pending'"
+        + " AND (t.updateDate_Status IS NULL OR t.updateDate_Status='' OR t.updateDate_Status='Date Approved'))";
+    static final String OWNED_HISTORY = SCOPED + MINE + " AND (" + PENDING + " OR t.STATUS='Completed')";
     private static final String TASK_FIELDS = "SELECT t.SR_NO, t.STATUS, t.CUSTOMERNAME, t.PRODUCTSUIT, t.PRODUCTTOOL,"
-        + " t.DESCRIPTION, t.MODULE_NAME, t.TEAM_LEADER, t.DEVELOPER_NAME, t.ASSIGNBY, t.START_DATE, t.END_DATE";
+        + " t.DESCRIPTION, t.MODULE_NAME, t.TEAM_LEADER, t.DEVELOPER_NAME, t.ASSIGNBY, t.START_DATE, t.END_DATE, t.updateDate_Status";
     private static final int LOG_LIMIT = 20;
 
     private AssignedTasks() {}
@@ -26,13 +28,19 @@ final class AssignedTasks {
         return id >= 1 && id <= Integer.MAX_VALUE && id == Math.rint(id);
     }
 
-    static JSONObject read(Connection db, Accounts.Account account, int before, boolean incoming) throws SQLException {
-        String sql = TASK_FIELDS + SCOPED + (incoming ? OPEN : " AND t.ASSIGNBY=?")
+    static JSONObject read(Connection db, Accounts.Account account, int before, String action) throws SQLException {
+        String scope;
+        switch (action) {
+            case "tasks/assigned-to-me": scope = MINE + " AND " + PENDING; break;
+            case "tasks/completed": scope = MINE + " AND t.STATUS='Completed'"; break;
+            default: scope = " AND t.ASSIGNBY=?";
+        }
+        String sql = TASK_FIELDS + SCOPED + scope
             + (before == 0 ? "" : " AND t.SR_NO<?") + " ORDER BY t.SR_NO DESC LIMIT " + (PAGE_SIZE + 1);
         try (PreparedStatement query = db.prepareStatement(sql)) {
             bind(query, account);
             if (before != 0) query.setInt(4, before);
-            return page(query);
+            return page(query, account);
         }
     }
 
@@ -64,21 +72,26 @@ final class AssignedTasks {
                 String pattern = "%" + term.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
                 for (int i = 0; i < 4; i++) query.setString(parameter++, pattern);
             }
-            return page(query).put("projectId", id);
+            return page(query, account).put("projectId", id);
         }
     }
 
-    private static JSONObject page(PreparedStatement query) throws SQLException {
+    private static JSONObject page(PreparedStatement query, Accounts.Account account) throws SQLException {
         try (ResultSet rows = query.executeQuery()) {
             JSONArray items = new JSONArray();
             int last = 0;
             while (items.length() < PAGE_SIZE && rows.next()) {
                 last = rows.getInt("SR_NO");
+                String status = label(rows, "STATUS");
+                String developer = label(rows, "DEVELOPER_NAME");
+                String dateApproval = label(rows, "updateDate_Status");
+                boolean history = account.fullname.equalsIgnoreCase(developer) && ("Completed".equalsIgnoreCase(status)
+                    || ("Pending".equalsIgnoreCase(status) && (dateApproval.isEmpty() || "Date Approved".equalsIgnoreCase(dateApproval))));
                 items.put(new JSONObject().put("id", last)
-                    .put("module", label(rows, "MODULE_NAME")).put("status", label(rows, "STATUS"))
+                    .put("module", label(rows, "MODULE_NAME")).put("status", status).put("workLog", history)
                     .put("customer", label(rows, "CUSTOMERNAME")).put("suite", label(rows, "PRODUCTSUIT"))
                     .put("tool", label(rows, "PRODUCTTOOL")).put("description", label(rows, "DESCRIPTION"))
-                    .put("lead", label(rows, "TEAM_LEADER")).put("developer", label(rows, "DEVELOPER_NAME"))
+                    .put("lead", label(rows, "TEAM_LEADER")).put("developer", developer)
                     .put("assigner", label(rows, "ASSIGNBY")).put("start", label(rows, "START_DATE")).put("due", label(rows, "END_DATE")));
             }
             Object next = items.length() == PAGE_SIZE && rows.next() ? last : JSONObject.NULL;
@@ -86,13 +99,15 @@ final class AssignedTasks {
         }
     }
 
-    static JSONObject workLog(Connection db, Accounts.Account account, int id) throws SQLException {
-        String authorized = "SELECT t.SR_NO" + SCOPED + OPEN + " AND t.SR_NO=?";
-        try (PreparedStatement query = db.prepareStatement(authorized)) {
+    static JSONObject workLog(Connection db, Accounts.Account account, int id, String today) throws SQLException {
+        String authorized = "SELECT t.SR_NO" + OWNED_HISTORY + " AND t.SR_NO=?";
+        boolean completed;
+        try (PreparedStatement query = db.prepareStatement("SELECT t.STATUS" + OWNED_HISTORY + " AND t.SR_NO=?")) {
             bind(query, account);
             query.setInt(4, id);
             try (ResultSet row = query.executeQuery()) {
                 if (!row.next()) return null;
+                completed = "Completed".equalsIgnoreCase(row.getString("STATUS"));
             }
         }
         String sql = "SELECT w.SR_NO, w.DATE, w.TODAYS_PROGRESS, w.STATUS, w.FULL_NAME FROM Update_Todays_Progress w"
@@ -112,12 +127,14 @@ final class AssignedTasks {
                         .put("author", label(rows, "FULL_NAME")));
                 }
                 return new JSONObject().put("kind", "task-work-log").put("taskId", id)
+                    .put("date", today).put("completed", completed)
+                    .put("loggedToday", !completed && TaskProgress.hasEntry(db, id, today))
                     .put("items", items).put("hasMore", items.length() == LOG_LIMIT && rows.next());
             }
         }
     }
 
-    private static void bind(PreparedStatement query, Accounts.Account account) throws SQLException {
+    static void bind(PreparedStatement query, Accounts.Account account) throws SQLException {
         query.setInt(1, account.id);
         query.setString(2, account.companyCode);
         query.setString(3, account.fullname);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Animated, Easing, I18nManager, Keyboard, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, I18nManager, Keyboard, KeyboardAvoidingView, Modal, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { AuthError, type Grant } from '../scm/auth-api';
 import { authClient } from '../scm/auth-config';
 import { useProtectedRead } from '../scm/protected-read';
@@ -7,6 +7,7 @@ import { scheduleLabel, taskSchedule } from '../scm/project-schedule';
 import type { AssignedTask } from '../scm/tasks-contract';
 import { FormMessage, Phase, SearchField, TextAction } from './Access';
 import { Action, DetailRecord, type } from './Primitives';
+import { TaskWorkLog } from './TaskWorkLog';
 import { useReducedMotion } from './motion';
 import { color } from './theme';
 
@@ -34,6 +35,7 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
   const [term, setTerm] = useState('');
   const [cursors, setCursors] = useState<number[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
+  const [confirmation, setConfirmation] = useState(0);
   const before = cursors.at(-1);
   const read = useCallback((grant: Grant, signal: AbortSignal) => {
     if (!authClient) return Promise.reject(new AuthError('unavailable'));
@@ -42,7 +44,10 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
   const { result, reload } = useProtectedRead(read);
   const data = result.kind === 'ready' ? result.data : null;
   const selectedTask = data?.items.find((task) => task.id === selected);
-  const open = (task: AssignedTask) => setSelected(task.id);
+  const open = (task: AssignedTask) => {
+    setConfirmation(0);
+    setSelected(task.id);
+  };
 
   function search(value: string) {
     Keyboard.dismiss();
@@ -57,6 +62,7 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
     <SearchField label="Search project tasks" placeholder="Task, assignee or status" value={input}
       onChange={setInput} onSubmit={() => search(input)} testID="project-task-search"
       onClear={input || term ? () => { setInput(''); search(''); } : undefined} />
+    {confirmation ? <Phase><Text accessibilityLiveRegion="polite" style={styles.success}>Task T-{confirmation} completed</Text></Phase> : null}
     {result.kind === 'loading' ? <Text accessibilityLiveRegion="polite" style={type.caption}>Loading project tasks…</Text> : null}
     {result.kind === 'error' ? <>
       <FormMessage message={result.code === 'forbidden' || result.code === 'not-found'
@@ -77,7 +83,11 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
         }} /> : null}
       </View> : null}
     </Phase> : null}
-    {selectedTask ? <TaskDetails task={selectedTask} close={() => setSelected(null)} /> : null}
+    {selectedTask ? <TaskDetails task={selectedTask} close={() => setSelected(null)} onComplete={() => {
+      setSelected(null);
+      setConfirmation(selectedTask.id);
+      reload();
+    }} /> : null}
   </View>;
 }
 
@@ -162,10 +172,10 @@ function Timeline({ tasks, open }: { tasks: AssignedTask[]; open: (task: Assigne
   </>;
 }
 
-function TaskDetails({ task, close }: { task: AssignedTask; close: () => void }) {
+function TaskDetails({ task, close, onComplete }: { task: AssignedTask; close: () => void; onComplete: () => void }) {
   const reduced = useReducedMotion();
   return <Modal transparent visible animationType={reduced ? 'none' : 'slide'} onRequestClose={close}>
-    <View style={styles.modal}>
+    <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <Pressable aria-hidden onPress={close} style={StyleSheet.absoluteFill} />
       <View accessibilityViewIsModal style={styles.sheet}>
         <View style={styles.sheetHeader}>
@@ -175,15 +185,16 @@ function TaskDetails({ task, close }: { task: AssignedTask; close: () => void })
           </View>
           <TextAction label="Close" onPress={close} />
         </View>
-        <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.pane}>
+        <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.pane} keyboardShouldPersistTaps="handled">
           {task.description ? <Text style={type.body}>{task.description}</Text> : null}
+          {task.workLog ? <TaskWorkLog id={task.id} onComplete={onComplete} /> : null}
           <DetailRecord rows={[
             ['Status', task.status], ['Assignee', task.developer], ['Assigned by', task.assigner], ['Team lead', task.lead],
             ['Start date', task.start], ['Due date', task.due],
           ]} />
         </ScrollView>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   </Modal>;
 }
 
@@ -204,6 +215,7 @@ const styles = StyleSheet.create({
   count: { fontWeight: '700', fontVariant: ['tabular-nums'] },
   laneEmpty: { color: color.subtle, padding: 12 },
   card: { padding: 12, gap: 6, minHeight: 78, borderRadius: 8, borderWidth: 1, borderColor: '#3A4658', backgroundColor: '#222D3D' },
+  success: { color: color.success, fontSize: 16, fontWeight: '600' },
   chart: { paddingHorizontal: 14, backgroundColor: color.panel, borderWidth: 1, borderColor: color.edge, borderRadius: 12 },
   range: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', paddingVertical: 12, columnGap: 12 },
   timelineRow: { borderTopWidth: StyleSheet.hairlineWidth, borderColor: color.edge, paddingVertical: 12, gap: 5 },

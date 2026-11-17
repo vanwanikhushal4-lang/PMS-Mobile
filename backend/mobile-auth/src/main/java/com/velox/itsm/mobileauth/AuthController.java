@@ -32,7 +32,7 @@ public class AuthController {
 
     @RequestMapping(value = {"/sign-in", "/challenge/verify", "/challenge/resend", "/sign-out", "/recovery/start", "/recovery/verify", "/recovery/complete",
         "/projects/list", "/projects/detail", "/projects/records", "/projects/tasks", "/projects/favorite",
-        "/tasks/assigned-by-me", "/tasks/assigned-to-me", "/tasks/work-log"}, method = RequestMethod.POST)
+        "/tasks/assigned-by-me", "/tasks/assigned-to-me", "/tasks/completed", "/tasks/work-log", "/tasks/progress", "/tasks/complete"}, method = RequestMethod.POST)
     public void post(HttpServletRequest request, HttpServletResponse response) throws IOException { respond(request, response, true); }
 
     @RequestMapping(value = {"/session", "/workspace", "/profile"}, method = RequestMethod.GET)

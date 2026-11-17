@@ -48,7 +48,8 @@ public final class AuthService implements AutoCloseable {
         switch (action) {
             case "session": case "sign-out": case "workspace": case "profile":
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
-            case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/work-log":
+            case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
+            case "tasks/work-log": case "tasks/progress": case "tasks/complete":
                 return session(action, input, bearer, now);
             default: break;
         }
@@ -223,7 +224,8 @@ public final class AuthService implements AutoCloseable {
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
                 result = projects(action, input, key, account, now);
                 break;
-            case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/work-log":
+            case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
+            case "tasks/work-log": case "tasks/progress": case "tasks/complete":
                 result = tasks(action, input, key, account, now);
                 break;
             default: result = reply(200, authenticated(account, item.until));
@@ -245,15 +247,33 @@ public final class AuthService implements AutoCloseable {
         if (!take("tasks/" + key, 100, now)) return rejected(429, "rate-limited");
         if ("tasks/work-log".equals(action)) {
             if (input.length() != 1 || !AssignedTasks.validId(input.opt("id"))) return rejected(400, "invalid-filter");
-            JSONObject log = accounts.workLog(account, input.getInt("id"));
+            JSONObject log = accounts.workLog(account, input.getInt("id"), TaskProgress.date(TaskProgress.localTime(now)));
             return log == null ? rejected(404, "task-not-found") : reply(200, log);
         }
+        if ("tasks/progress".equals(action) || "tasks/complete".equals(action)) return updateTask(action, input, account, now);
         int before = 0;
         if (input.length() != 0) {
             if (input.length() != 1 || !AssignedTasks.validId(input.opt("before"))) return rejected(400, "invalid-filter");
             before = input.getInt("before");
         }
-        return reply(200, accounts.assignedTasks(account, before, "tasks/assigned-to-me".equals(action)));
+        return reply(200, accounts.assignedTasks(account, before, action));
+    }
+
+    private Reply updateTask(String action, JSONObject input, Account account, long now) throws SQLException {
+        boolean completing = "tasks/complete".equals(action);
+        if (input.length() != (completing ? 1 : 2) || !AssignedTasks.validId(input.opt("id"))) return rejected(400, "invalid-filter");
+        int id = input.getInt("id");
+        String note = null;
+        if (!completing) {
+            note = string(input, "note", 255).trim();
+            if (note.isEmpty()) return rejected(400, "invalid-note");
+        }
+        switch (accounts.updateTask(account, id, note, TaskProgress.localTime(now))) {
+            case MISSING: return rejected(404, "task-not-found");
+            case DUPLICATE: return rejected(409, "progress-already-logged");
+            case CLOSED: return rejected(409, "task-closed");
+            default: return reply(200, new JSONObject().put("kind", completing ? "task-completed" : "task-progress-saved").put("taskId", id));
+        }
     }
 
     private Reply issue(Account account, long now) throws SQLException {
