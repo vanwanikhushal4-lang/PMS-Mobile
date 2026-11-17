@@ -289,7 +289,9 @@ public final class AuthService implements AutoCloseable {
         if ("projects/records/review-queue".equals(action) || "projects/records/review".equals(action)) {
             boolean queue = action.endsWith("-queue");
             if (!(queue ? ProjectReview.validQueue(input) : ProjectReview.validDecision(input))) return rejected(400, "invalid-filter");
-            if (!ProjectReview.allowed(account, ProjectRecords.Kind.from(input.opt("scope")))) return rejected(403, "forbidden");
+            boolean ownRequirements = queue && ProjectReview.Queue.from(input) == ProjectReview.Queue.SUBMITTED;
+            if (!(ownRequirements ? ProjectReview.canListOwnRequirements(account)
+                    : ProjectReview.allowed(account, ProjectRecords.Kind.from(input.opt("scope"))))) return rejected(403, "forbidden");
             if (queue) return reply(200, accounts.projects(account, input, action));
             JSONObject result = accounts.reviewProjectRecord(account, input, TaskProgress.localTime(now));
             return result == null ? rejected(404, "project-not-found")

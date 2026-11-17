@@ -19,6 +19,7 @@ export default function ProjectsScreen() {
   const canBrowsePublishing = state.kind === 'active' && state.session.identity.capabilities.includes('projects.publish');
   const canReview = state.kind === 'active' && state.session.identity.capabilities.some((capability) =>
     capability === 'projects.requirement-review' || capability === 'projects.understanding-review');
+  const canListOwnRequirements = state.kind === 'active' && state.session.identity.capabilities.includes('projects.requirements-submitted');
   const [input, setInput] = useState('');
   const [term, setTerm] = useState('');
   const [saved, setSaved] = useState(false);
@@ -42,7 +43,8 @@ export default function ProjectsScreen() {
     <View style={styles.content}>
       {canCreate ? <Action label="Create project" secondary testID="open-project-create" onPress={() => router.push('/projects/create')} /> : null}
       {canBrowsePublishing ? <TextAction label="Publish Project" testID="open-publishing" onPress={() => router.push('/projects/publishing')} /> : null}
-      {canReview ? <TextAction label="Document review" testID="open-document-review" onPress={() => router.push('/projects/review')} /> : null}
+      {canReview || canListOwnRequirements ? <TextAction label={canReview ? 'Document review' : 'My requirements'}
+        testID={canReview ? 'open-document-review' : 'open-my-requirements'} onPress={() => router.push('/projects/review')} /> : null}
       <WorkspaceTabs labels={folders} index={saved ? 1 : 0} onSelect={(index) => {
         if (saved === (index === 1)) return;
         setSaved(index === 1);

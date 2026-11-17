@@ -107,9 +107,11 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 seed(connection, 15, "document-project-head", "Riya Naik", "Head_Projects", "Non-AD", "riya@fixture.invalid", "+12025550115", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 16, "document-limited", "Neil Kapoor", "MD", "Non-AD", "neil@fixture.invalid", "+12025550116", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 17, "document-other-company", "Alok Mehta", "MD", "Non-AD", "alok@fixture.invalid", "+12025550117", "QA Second Company", "QA-B", "off", hash, null, true);
+                seed(connection, 18, "requirements-sales", "Meera Shah", "Sales_Initiator", "Non-AD", "meera@fixture.invalid", "+12025550118", "QA Service Operations", "QA-A", "off", hash, null, true);
                 sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMS,Requirement_Documents' WHERE LOGINID=14");
                 sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMS' WHERE LOGINID IN (15,17)");
                 sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMSArchive,Requirement_Documents_Archive' WHERE LOGINID=16");
+                sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,Requirement_Documents' WHERE LOGINID=18");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Pune', BRANCH='West office', DEPARTMENT='Commercial operations', SUB_DEPARTMENT='Delivery' WHERE LOGINID=1");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Chennai', BRANCH='South office', DEPARTMENT='Engineering' WHERE LOGINID=2");
                 sql.execute("CREATE TABLE ProjectData (SR_NO INT PRIMARY KEY, PROJECTNAME VARCHAR(500), CUSTOMERNAME VARCHAR(500), FUNCTION_NAME VARCHAR(500), RESPONSIBILITY VARCHAR(500), PRODUCTSUIT VARCHAR(500), PRODUCTTOOL VARCHAR(500), Task_ID VARCHAR(500))");
@@ -122,6 +124,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 sql.execute("INSERT INTO ProjectData VALUES (47,'Riverside change board','Riverside Works','Change review','Pilot readiness','Service Operations','VPN Access','PM-1047')");
                 sql.execute("INSERT INTO scm_mobile_project_access VALUES (1,'QA-A',41), (1,'QA-A',43), (1,'QA-A',44), (2,'QA-B',51), (1,'QA-B',52)");
                 sql.execute("INSERT INTO scm_mobile_project_access VALUES (14,'QA-A',47),(15,'QA-A',47),(16,'QA-A',47),(17,'QA-B',51)");
+                sql.execute("INSERT INTO scm_mobile_project_access VALUES (18,'QA-A',44),(18,'QA-A',47)");
                 sql.execute("ALTER TABLE ProjectData ADD SUBMITTEDBY VARCHAR(128)");
                 sql.execute("CREATE TABLE FunctionMaster (SR_NO INT PRIMARY KEY, MODULE VARCHAR(120), FUNCTION_NAME VARCHAR(240))");
                 sql.execute("INSERT INTO FunctionMaster VALUES (1,'PMS','Access rollout'),(2,'PMS','Development'),(3,'PMS','Implementation'),(4,'PMS','Development planning')");
@@ -293,7 +296,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
 
     private static void seedRecordDetails(Statement sql) throws java.sql.SQLException {
         for (String column : new String[]{"POnumber", "productSuitName", "securityTool", "FunctionName",
-                "productManager", "UserName", "Designation", "Description", "rdNote"}) {
+                "productManager", "UserName", "UserId", "Designation", "Description", "rdNote"}) {
             sql.execute("ALTER TABLE requirementDocument ADD " + column + " VARCHAR(2000)");
         }
         for (String column : new String[]{"POnumber", "rd_id", "productSuite", "securityTool", "FunctionName",
@@ -330,6 +333,19 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
             + " (76,'UD-76','UD Pending For Approval','24-11-2026',NULL,'Different company',NULL)");
         sql.execute("INSERT INTO scm_mobile_project_record VALUES (47,'QA-A','requirement',64), (47,'QA-A','understanding',72),"
             + " (47,'QA-A','understanding',73), (47,'QA-A','understanding',74), (43,'QA-A','understanding',75), (51,'QA-B','understanding',76)");
+        sql.execute("UPDATE requirementDocument SET UserId='requirements-sales' WHERE SR_NO IN (61,62)");
+        sql.execute("INSERT INTO requirementDocument (SR_NO,rd_id,RDStatus,Date,UserName,UserId,rdNote) VALUES"
+            + " (65,'RD-65',NULL,'21-11-2026','Meera Shah','requirements-sales','Requirement in an unassigned project'),"
+            + " (67,'RD-67','RD Approved By SI','22-11-2026','Meera Shah','requirements-sales','Use the approved access checklist'),"
+            + " (68,'RD-68','RD Approved By MD','22-11-2026','Meera Shah','different-user','Submitted by a colleague with the same display name'),"
+            + " (69,'RD-69',NULL,'23-11-2026','Meera Shah','requirements-sales','Document the device handoff before go-live')");
+        sql.execute("INSERT INTO UnderstandingDocument (SR_NO,ud_id,UDStatus,Date,projectObj,rejectMDReason,rejectedByMD,rejectedMDDate) VALUES"
+            + " (77,'UD-77','UD Approved By MD','21-11-2026','Authorize the test rollout',NULL,NULL,NULL),"
+            + " (78,'UD-78','UD Rejected By MD','21-11-2026','Document the migration window','Add the rollback owner','document-project-head','23-11-2026 14:10'),"
+            + " (79,'UD-79','UD Approved By SI','22-11-2026','Archive the original approval',NULL,NULL,NULL)");
+        sql.execute("INSERT INTO scm_mobile_project_record VALUES (43,'QA-A','requirement',65),(47,'QA-A','requirement',67),"
+            + " (47,'QA-A','requirement',68),(47,'QA-A','requirement',69),(47,'QA-A','understanding',77),"
+            + " (47,'QA-A','understanding',78),(47,'QA-A','understanding',79)");
     }
 
     private static byte[] fixturePdf(String message) {

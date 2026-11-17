@@ -73,7 +73,8 @@ public final class Accounts {
                 case "projects/detail": return Projects.detail(db, account, input.getInt("id"));
                 case "projects/records": return ProjectRecords.list(db, account, input.getInt("id"));
                 case "projects/records/detail": return ProjectRecords.detail(db, account, input);
-                case "projects/records/review-queue": return ProjectReview.queue(db, account, ProjectRecords.Kind.from(input.get("scope")), input.optInt("before"));
+                case "projects/records/review-queue": return ProjectReview.queue(db, account, ProjectRecords.Kind.from(input.get("scope")),
+                    ProjectReview.Queue.from(input), input.optInt("before"));
                 case "projects/tasks": return AssignedTasks.projectPage(db, account, input);
                 case "projects/favorite": return Projects.favorite(db, account, input.getInt("id"), input.getBoolean("favorite"));
                 case "projects/create-options": return ProjectCreation.options(db, account, input.optString("query"), input.optString("functionQuery"));
@@ -291,6 +292,7 @@ public final class Accounts {
             if (publishingAccess()) capabilities.put("projects.publish");
             if (ProjectReview.allowed(this, ProjectRecords.Kind.REQUIREMENT)) capabilities.put("projects.requirement-review");
             if (ProjectReview.allowed(this, ProjectRecords.Kind.UNDERSTANDING)) capabilities.put("projects.understanding-review");
+            if (ProjectReview.canListOwnRequirements(this)) capabilities.put("projects.requirements-submitted");
             if (taskWorkspace()) capabilities.put("tasks.assigned-by-me").put("tasks.assigned-to-me");
             if ((projectAccess || projectCreate) && TaskRoster.canCreate(this)) capabilities.put("tasks.create");
             if (TaskRoster.canCreate(this)) capabilities.put("tasks.create-standalone");

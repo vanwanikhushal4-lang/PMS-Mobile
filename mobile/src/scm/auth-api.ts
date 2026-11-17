@@ -2,7 +2,7 @@ import { decodeAuthStep, type AuthStep } from './auth-contract.ts';
 import { decodeAttachments, type AttachmentTarget } from './attachments-contract.ts';
 import { decodeWorkspace } from './workspace-contract.ts';
 import { decodeCreatedProject, decodeDocumentReviewQueue, decodeProfile, decodeProject, decodeProjectCreateOptions,
-  decodeProjectRecordDetail, decodeProjectRecords, decodeProjects, type DocumentReviewDecision, type DocumentReviewScope,
+  decodeProjectRecordDetail, decodeProjectRecords, decodeProjects, type DocumentQueueMode, type DocumentReviewDecision, type DocumentReviewScope,
   type ProjectDraft, type ProjectRecordTarget } from './projects-contract.ts';
 import { decodePublishTree, decodePurchaseOrder, decodePurchaseOrders, type PublishCustomer, type PublishPath } from './publishing-contract.ts';
 import { decodeAssignedTasks, decodeTaskAssignees, decodeTaskContexts, decodeTaskDates, decodeWorkLog,
@@ -211,8 +211,10 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       if (!data) throw new AuthError('bad-response');
       return data;
     },
-    documentReviewQueue: async (grant: Grant, scope: DocumentReviewScope, before?: number, signal?: AbortSignal) => {
-      const data = decodeDocumentReviewQueue(await request('projects/records/review-queue', { scope, before }, signal, grant.sessionToken), scope, before);
+    documentReviewQueue: async (grant: Grant, scope: DocumentReviewScope, before?: number, signal?: AbortSignal,
+      mode: DocumentQueueMode = 'pending') => {
+      const filter = { scope, before, mode: mode === 'pending' ? undefined : mode };
+      const data = decodeDocumentReviewQueue(await request('projects/records/review-queue', filter, signal, grant.sessionToken), scope, before, mode);
       if (!data) throw new AuthError('bad-response');
       return data;
     },

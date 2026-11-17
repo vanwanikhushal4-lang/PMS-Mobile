@@ -14,6 +14,32 @@ final class ProjectReview {
     private static final int LIMIT = 30;
     private static final DateTimeFormatter LEGACY_DATE = DateTimeFormatter.ofPattern("dd-MM-uuuu HH:mm", java.util.Locale.ROOT);
 
+    enum Queue {
+        PENDING("pending"), APPROVED("approved"), REJECTED("rejected"), SUBMITTED("submitted");
+
+        final String key;
+        Queue(String key) { this.key = key; }
+
+        static Queue from(JSONObject input) {
+            if (!input.has("mode")) return PENDING;
+            for (Queue queue : values()) if (queue.key.equals(input.opt("mode"))) return queue;
+            return null;
+        }
+
+        String condition(ProjectRecords.Kind scope) {
+            String status = "LOWER(" + scope.status + ")";
+            switch (this) {
+                case SUBMITTED: return "d.UserId=?";
+                case APPROVED:
+                    return status + (scope == ProjectRecords.Kind.REQUIREMENT
+                        ? " IN ('rd approved','rd approved by md','rd approved by si')"
+                        : " IN ('ud approved by md','ud approved by si')");
+                case REJECTED: return status + "='ud rejected by md'";
+                default: return status + "=LOWER(?)";
+            }
+        }
+    }
+
     private ProjectReview() {}
 
     static boolean supports(ProjectRecords.Kind scope) {
@@ -28,9 +54,19 @@ final class ProjectReview {
             && (director || "Head_Projects".equalsIgnoreCase(account.role));
     }
 
+    static boolean canListOwnRequirements(Accounts.Account account) {
+        return account.projectAccess && "Sales_Initiator".equalsIgnoreCase(account.role)
+            && account.hasSidebarScope("Requirement_Documents");
+    }
+
     static boolean validQueue(JSONObject input) {
         boolean page = input.has("before");
-        return input.length() == (page ? 2 : 1) && supports(ProjectRecords.Kind.from(input.opt("scope")))
+        ProjectRecords.Kind scope = ProjectRecords.Kind.from(input.opt("scope"));
+        Queue queue = Queue.from(input);
+        return supports(scope) && queue != null
+            && (queue != Queue.SUBMITTED || scope == ProjectRecords.Kind.REQUIREMENT)
+            && (queue != Queue.REJECTED || scope == ProjectRecords.Kind.UNDERSTANDING)
+            && input.length() == 1 + (page ? 1 : 0) + (input.has("mode") ? 1 : 0)
             && (!page || AssignedTasks.validId(input.opt("before")));
     }
 
@@ -59,32 +95,35 @@ final class ProjectReview {
         return new JSONObject().put("revision", Secrets.tokenHash(snapshot.toString())).put("canReject", scope == ProjectRecords.Kind.UNDERSTANDING);
     }
 
-    static JSONObject queue(Connection db, Accounts.Account account, ProjectRecords.Kind scope, int before) throws SQLException {
+    static JSONObject queue(Connection db, Accounts.Account account, ProjectRecords.Kind scope, Queue queue, int before) throws SQLException {
         String sql = ProjectRecords.columns(scope) + ", q.PROJECT_ID, p.PROJECTNAME, p.Task_ID"
+            + (queue == Queue.REJECTED ? ", d.rejectedMDDate" : "")
             + " FROM (SELECT l.RECORD_ID, MIN(p.SR_NO) AS PROJECT_ID FROM scm_mobile_project_access a"
             + " JOIN ProjectData p ON p.SR_NO=a.PROJECT_ID"
             + " JOIN scm_mobile_project_record l ON l.PROJECT_ID=a.PROJECT_ID AND l.COMPANY_CODE=a.COMPANY_CODE"
             + " WHERE a.LOGIN_ID=? AND a.COMPANY_CODE=? AND l.RECORD_KIND=?"
             + (before > 0 ? " AND l.RECORD_ID<?" : "") + " GROUP BY l.RECORD_ID) q"
             + " JOIN " + scope.table + " d ON d.SR_NO=q.RECORD_ID JOIN ProjectData p ON p.SR_NO=q.PROJECT_ID"
-            + " WHERE LOWER(" + scope.status + ")=LOWER(?) ORDER BY d.SR_NO DESC LIMIT " + (LIMIT + 1);
+            + " WHERE " + queue.condition(scope) + " ORDER BY d.SR_NO DESC LIMIT " + (LIMIT + 1);
         try (PreparedStatement query = db.prepareStatement(sql)) {
             query.setInt(1, account.id);
             query.setString(2, account.companyCode);
             query.setString(3, scope.key);
             int parameter = 4;
             if (before > 0) query.setInt(parameter++, before);
-            query.setString(parameter, pendingStatus(scope));
+            if (queue == Queue.PENDING) query.setString(parameter, pendingStatus(scope));
+            if (queue == Queue.SUBMITTED) query.setString(parameter, account.username);
             try (ResultSet rows = query.executeQuery()) {
                 JSONArray items = new JSONArray();
                 int last = 0;
                 while (items.length() < LIMIT && rows.next()) {
                     JSONObject item = ProjectRecords.summary(rows);
                     last = item.getInt("id");
+                    if (queue == Queue.REJECTED) item.put("decisionDate", ProjectRecords.text(rows, "rejectedMDDate"));
                     items.put(item.put("projectId", rows.getInt("PROJECT_ID"))
                         .put("projectName", ProjectRecords.text(rows, "PROJECTNAME")).put("projectReference", ProjectRecords.text(rows, "Task_ID")));
                 }
-                return new JSONObject().put("kind", "project-review-queue").put("scope", scope.key).put("items", items)
+                return new JSONObject().put("kind", "project-review-queue").put("scope", scope.key).put("mode", queue.key).put("items", items)
                     .put("next", items.length() == LIMIT && rows.next() ? last : JSONObject.NULL);
             }
         }

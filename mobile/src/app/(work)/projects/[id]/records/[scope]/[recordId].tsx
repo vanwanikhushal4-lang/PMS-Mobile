@@ -32,7 +32,8 @@ export default function ProjectRecordScreen() {
   const title = scope ? projectRecordTitles[scope] : 'Project record';
   const detail = result.kind === 'ready' ? result.data : null;
   const missing = result.kind === 'error' && (result.code === 'not-found' || result.code === 'forbidden');
-  const fromReview = params.source === 'review';
+  const fromReview = params.source === 'review' || params.source === 'submitted';
+  const backLabel = params.source === 'submitted' ? 'My requirements' : fromReview ? 'Document review' : 'Project records';
   const recordKey = `${scope}-${id}-${recordId}`;
   const [feedback, setFeedback] = useState<{ key: string; success: boolean; message: string } | null>(null);
   const message = feedback?.key === recordKey ? feedback : null;
@@ -46,7 +47,7 @@ export default function ProjectRecordScreen() {
   }
 
   return <Screen keyboard={visibleReview} workspace>
-    <BrandedTopBar><TextAction label={fromReview ? 'Document review' : 'Project records'} onPress={back} /></BrandedTopBar>
+    <BrandedTopBar><TextAction label={backLabel} onPress={back} /></BrandedTopBar>
     <View style={styles.content}>
       <View style={styles.header}>
         {detail?.item.reference ? <Text style={type.eyebrow}>{title}</Text> : null}
