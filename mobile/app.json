@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "SCM Mobile",
+    "slug": "scm-mobile",
+    "scheme": "scm-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "plugins": [
+      "expo-router",
+      "expo-secure-store"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.velox.scm.mobile"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#F5F7FA",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": true,
+      "package": "com.velox.scm.mobile"
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

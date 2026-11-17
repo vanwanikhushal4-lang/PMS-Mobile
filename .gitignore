@@ -1,0 +1,4 @@
+/.scm-runtime/
+/.qa/
+/docs/legacy-inventory.json
+__pycache__/

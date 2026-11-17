@@ -1,0 +1,233 @@
+import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
+import { test } from 'node:test';
+import { createAuthClient, resolveAuthConfig } from '../../../../mobile/src/scm/auth-api.ts';
+
+const base = process.env.SCM_JAVA_QA_ENDPOINT;
+const strict = process.env.SCM_JAVA_STRICT_ENDPOINT;
+const disabled = process.env.SCM_JAVA_DISABLED_ENDPOINT;
+const inbox = process.env.SCM_JAVA_QA_INBOX;
+if (!base || !strict || !disabled || !inbox) throw new Error('Run tools/test_mobile_auth_java.sh to launch the private staging service');
+const client = createAuthClient(resolveAuthConfig(base, true));
+const factoryPassword = 'Stage-only-password-28';
+const credentials = (username, companyCode = 'QA-A', password = factoryPassword) => ({ username, companyCode, password });
+
+async function count(channel, address) {
+  const data = await readFile(inbox, 'utf8').catch((error) => { if (error.code === 'ENOENT') return ''; throw error; });
+  return data.split('\n').filter((row) => row.startsWith(`${channel}\t${address}\t`));
+}
+async function delivered(channel, address, previous = 0) {
+  for (let attempt = 0; attempt < 80; attempt++) {
+    const entries = await count(channel, address);
+    if (entries.length > previous) return entries.at(-1).split('\t')[2];
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error('The staging code was not delivered to its test sink');
+}
+function totp(secret, step) {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  const binary = [...secret].map((char) => alphabet.indexOf(char).toString(2).padStart(5, '0')).join('');
+  const key = Buffer.from((binary.match(/.{8}/g) ?? []).map((chunk) => parseInt(chunk, 2)));
+  const counter = Buffer.alloc(8);
+  counter.writeBigUInt64BE(BigInt(step));
+  const digest = createHmac('sha1', key).update(counter).digest();
+  const offset = digest.at(-1) & 15;
+  return ((digest.readUInt32BE(offset) & 0x7fffffff) % 1_000_000).toString().padStart(6, '0');
+}
+
+await test('the production profile is opt-in and requires TLS; staging rejects malformed requests', async () => {
+  assert.equal((await fetch(`${disabled}session`)).status, 404);
+  assert.equal((await fetch(`${strict}session`)).status, 403);
+  const body = await fetch(`${base}sign-in`, { method: 'POST', headers: { 'Content-Type': 'text/plain' }, body: 'irrelevant' });
+  assert.equal(body.status, 415);
+  assert.equal(body.headers.get('cache-control'), 'no-store');
+  assert.equal((await fetch(`${base}sign-in`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: ' '.repeat(9000) })).status, 413);
+  assert.equal((await fetch(`${base}session?extra=1`)).status, 400);
+});
+
+await test('scoped legacy identity, disabled accounts, and session confirmation/logout', async () => {
+  const alice = await client.signIn(credentials('alex'));
+  assert.equal(alice.kind, 'authenticated');
+  assert.equal(alice.session.identity.role, 'Sales Manager');
+  assert.equal(alice.session.identity.companyCode, 'QA-A');
+  assert.equal((await client.signIn(credentials('alex', 'QA-B'))).reason, 'invalid-credentials');
+  assert.equal((await client.signIn(credentials('missing'))).reason, 'invalid-credentials');
+  assert.equal((await client.signIn(credentials('disabled'))).reason, 'invalid-credentials');
+  const other = await client.signIn(credentials('alex', 'QA-B', 'Second-company-fixture-only'));
+  assert.equal(other.session.identity.role, 'Engineer');
+  assert.equal(other.session.identity.companyCode, 'QA-B');
+  assert.equal((await client.session(alice.grant)).identity.displayName, 'Alex Rao');
+  await client.signOut(alice.grant);
+  await client.signOut(alice.grant);
+  await assert.rejects(() => client.session(alice.grant), { code: 'expired' });
+  assert.equal((await client.session(other.grant)).identity.displayName, 'Alex Kim');
+});
+
+await test('directory sign-in follows the directory adapter and has no local-password fallback', async () => {
+  assert.equal((await client.signIn(credentials('directory'))).reason, 'invalid-credentials');
+  const fromDirectory = await client.signIn(credentials('directory', 'QA-A', 'Synthetic-AD-only-22'));
+  assert.equal(fromDirectory.session.identity.displayName, 'Maya Sen');
+  assert.equal((await client.startRecovery({ companyCode: 'QA-A', username: 'directory', channel: 'email' })).kind, 'recovery-sent');
+  assert.equal((await count('email', 'dir@fixture.invalid')).length, 0);
+});
+
+await test('workspace shows requester totals and up to 20 latest incident updates within the verified company', async () => {
+  assert.equal((await fetch(`${base}workspace`)).status, 401);
+  const first = await client.signIn(credentials('alex'));
+  const request = { headers: { Authorization: `Bearer ${first.grant.sessionToken}` } };
+  assert.equal((await fetch(`${base}workspace?companyCode=QA-B`, request)).status, 400);
+  const workspace = await client.workspace(first.grant);
+  assert.equal(workspace.total, 3);
+  assert.deepEqual(workspace.statuses, [{ status: 'Assigned', count: 2 }, { status: 'Resolved', count: 1 }]);
+  assert.deepEqual(workspace.activity.map(({ incidentId }) => incidentId), ['INC-381', 'INC-409', 'INC-434']);
+  assert.equal(workspace.activity[0].message, 'Workplace Support scheduled the Wi-Fi diagnostics.');
+  assert.equal(workspace.activity[0].date, '2026-11-03T09:18:00');
+  assert.equal(workspace.activity[2].date, null);
+  const other = await client.signIn(credentials('alex', 'QA-B', 'Second-company-fixture-only'));
+  assert.deepEqual(await client.workspace(other.grant), {
+    total: 1, statuses: [{ status: 'Closed', count: 1 }],
+    activity: [{ incidentId: 'INC-381', status: 'Closed', date: '2026-11-04T10:20:00', message: 'Second company activity.' }],
+  });
+  const empty = await client.signIn(credentials('directory', 'QA-A', 'Synthetic-AD-only-22'));
+  assert.deepEqual(await client.workspace(empty.grant), { total: 0, statuses: [], activity: [] });
+  const history = await client.signIn(credentials('phone'));
+  const capped = await client.workspace(history.grant);
+  assert.equal(capped.total, 21);
+  assert.equal(capped.activity.length, 20);
+  assert.equal(capped.activity[0].incidentId, 'INC-QA-41');
+  assert.equal(capped.activity.at(-1).incidentId, 'INC-QA-22');
+  await client.signOut(first.grant);
+  await assert.rejects(() => client.workspace(first.grant), { code: 'expired' });
+});
+
+await test('SMS code uses the test sink, resend rotates it, and only one racing verification succeeds', async () => {
+  const start = await client.signIn(credentials('sms'));
+  assert.equal(start.kind, 'challenge');
+  assert.equal(start.maskedDestination, '•••103');
+  const oldCode = await delivered('sms', '+12025550103');
+  await assert.rejects(() => client.session({ sessionToken: start.challengeId, expiresAt: start.expiresAt }), { code: 'expired' });
+  const next = await client.resend(start.challengeId);
+  const code = await delivered('sms', '+12025550103', 1);
+  assert.equal(next.canResend, false);
+  assert.equal((await client.verify(start.challengeId, oldCode)).reason, 'expired');
+  assert.equal((await client.verify(next.challengeId, code === '111111' ? '222222' : '111111')).reason, 'invalid-code');
+  const races = await Promise.all([client.verify(next.challengeId, code), client.verify(next.challengeId, code)]);
+  assert.equal(races.filter((result) => result.kind === 'authenticated').length, 1);
+  assert.equal(races.filter((result) => result.kind === 'rejected' && result.reason === 'expired').length, 1);
+});
+
+await test('profile, projects, tasks and work logs enforce the verified account and company', async () => {
+  assert.equal((await fetch(`${base}profile`)).status, 401);
+  const a = await client.signIn(credentials('alex'));
+  const b = await client.signIn(credentials('alex', 'QA-B', 'Second-company-fixture-only'));
+  const noAccess = await client.signIn(credentials('directory', 'QA-A', 'Synthetic-AD-only-22'));
+  assert.deepEqual(a.session.identity.capabilities, ['projects.read', 'tasks.assigned-by-me', 'tasks.assigned-to-me']);
+  assert.deepEqual(noAccess.session.identity.capabilities, []);
+  assert.deepEqual(await client.profile(a.grant), {
+    email: 'alex@fixture.invalid', phone: '+12025550101', location: 'Pune', site: 'West office',
+    department: 'Commercial operations', subdepartment: 'Delivery',
+  });
+  assert.equal((await client.profile(b.grant)).location, 'Chennai');
+  assert.equal((await client.profile(b.grant)).subdepartment, '');
+  const aProjects = await client.projects(a.grant, {});
+  assert.deepEqual(aProjects.items.map(({ id }) => id), [44, 43, 41]);
+  assert.equal(aProjects.next, null);
+  assert.deepEqual((await client.projects(b.grant, {})).items.map(({ id }) => id), [51]);
+  assert.deepEqual((await client.projects(a.grant, { query: '% coverage' })).items.map(({ id }) => id), [44]);
+  assert.deepEqual((await client.projects(a.grant, { query: '_' })).items, []);
+  assert.deepEqual((await client.projects(a.grant, { query: 'riverside' })).items.map(({ id }) => id), [44, 41]);
+  assert.equal((await client.project(a.grant, 43)).responsibility, 'Survey and handover');
+  const records = await client.projectRecords(a.grant, 44);
+  assert.deepEqual(records.requirements.items.map(({ reference }) => reference), ['RD-61']);
+  assert.equal(records.understanding.items[0].status, 'UD Approved By MD');
+  assert.equal(records.kickoff.items[0].format, 'Video conference');
+  assert.deepEqual((await client.projectRecords(a.grant, 41)).kickoff, { items: [], hasMore: false });
+  assert.deepEqual((await client.projectRecords(b.grant, 51)).requirements.items.map(({ reference }) => reference), ['RD-63']);
+  await assert.rejects(() => client.projectRecords(a.grant, 51), { code: 'not-found' });
+  await assert.rejects(() => client.project(a.grant, 51), { code: 'not-found' });
+  await assert.rejects(() => client.project(a.grant, 52), { code: 'not-found' });
+  await assert.rejects(() => client.project(a.grant, 555), { code: 'not-found' });
+  await assert.rejects(() => client.projects(noAccess.grant, {}), { code: 'forbidden' });
+  await assert.rejects(() => client.project(noAccess.grant, 41), { code: 'forbidden' });
+  const request = (body) => ({
+    method: 'POST', headers: { Authorization: `Bearer ${a.grant.sessionToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  assert.equal((await fetch(`${base}projects/list`, request({ companyCode: 'QA-B' }))).status, 400);
+  assert.equal((await fetch(`${base}projects/detail`, request({ id: '41' }))).status, 400);
+  assert.deepEqual((await client.assignedTasks(a.grant)).items.map(({ id }) => id), [202, 201]);
+  assert.deepEqual((await client.assignedTasks(a.grant, 202)).items.map(({ id }) => id), [201]);
+  assert.deepEqual((await client.assignedTasks(b.grant)).items.map(({ id }) => id), [204]);
+  assert.equal((await client.assignedTasks(a.grant)).items[1].developer, 'Noor Paul');
+  assert.deepEqual((await client.myTasks(a.grant)).items.map(({ id }) => id), [206]);
+  assert.deepEqual(await client.workLog(a.grant, 206), {
+    taskId: 206, hasMore: false, items: [
+      { id: 301, date: '16.11.2026', note: 'Verified pilot accounts and recorded rollout exceptions.', status: 'In-Progress', author: 'Alex Rao' },
+    ],
+  });
+  await assert.rejects(() => client.workLog(a.grant, 207), { code: 'not-found' });
+  await assert.rejects(() => client.workLog(b.grant, 206), { code: 'not-found' });
+  await assert.rejects(() => client.assignedTasks(noAccess.grant), { code: 'forbidden' });
+  assert.equal((await fetch(`${base}tasks/assigned-by-me`, request({ fullname: 'Alex Kim' }))).status, 400);
+  const many = await client.signIn(credentials('phone'));
+  const first = await client.projects(many.grant, {});
+  assert.equal(first.items.length, 30);
+  assert.equal(first.next, 103);
+  const second = await client.projects(many.grant, { before: first.next });
+  assert.deepEqual(second.items.map(({ id }) => id), [102, 101, 100]);
+  assert.equal(second.next, null);
+  await client.signOut(a.grant);
+  await assert.rejects(() => client.profile(a.grant), { code: 'expired' });
+  await assert.rejects(() => client.projects(a.grant, {}), { code: 'expired' });
+  await assert.rejects(() => client.assignedTasks(a.grant), { code: 'expired' });
+});
+
+await test('authenticator enrollment generates a usable secret and prevents reusing a time slot', async () => {
+  const first = await client.signIn(credentials('enroll'));
+  assert.equal(first.kind, 'enrollment');
+  const uri = new URL(first.setupUri);
+  const secret = uri.searchParams.get('secret');
+  assert.match(secret, /^[A-Z2-7]{32}$/);
+  const frame = Math.floor(Date.now() / 30000) + 1;
+  const code = totp(secret, frame);
+  assert.equal((await client.verify(first.challengeId, code)).kind, 'authenticated');
+  const returning = await client.signIn(credentials('enroll'));
+  assert.equal(returning.kind, 'challenge');
+  assert.equal(returning.method, 'totp');
+  assert.equal((await client.verify(returning.challengeId, code)).reason, 'invalid-code');
+  const existing = await client.signIn(credentials('totp'));
+  assert.equal((await client.verify(existing.challengeId, totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', frame))).kind, 'authenticated');
+});
+
+await test('email recovery changes only the verified mobile credential and invalidates older sessions', async () => {
+  const prior = await client.signIn(credentials('alex'));
+  const unknown = await client.startRecovery({ companyCode: 'QA-A', username: 'does-not-exist', channel: 'email' });
+  const requested = await client.startRecovery({ companyCode: 'QA-A', username: 'alex', channel: 'email' });
+  assert.equal(unknown.kind, requested.kind);
+  const code = await delivered('email', 'alex@fixture.invalid');
+  assert.equal((await client.verifyRecovery(unknown.challengeId, code)).reason, 'invalid-code');
+  assert.equal((await client.completeRecovery(requested.challengeId, 'Unproven-password')).reason, 'expired');
+  const verified = await client.verifyRecovery(requested.challengeId, code);
+  assert.equal(verified.kind, 'recovery-verified');
+  assert.equal((await client.completeRecovery(verified.resetGrant, 'too-short')).reason, 'password-policy');
+  assert.equal((await client.completeRecovery(verified.resetGrant, 'Replacement-mobile-pass')).kind, 'password-changed');
+  assert.equal((await client.completeRecovery(verified.resetGrant, 'Different-password')).reason, 'expired');
+  await assert.rejects(() => client.session(prior.grant), { code: 'expired' });
+  assert.equal((await client.signIn(credentials('alex'))).reason, 'invalid-credentials');
+  assert.equal((await client.signIn(credentials('alex', 'QA-A', 'Replacement-mobile-pass'))).kind, 'authenticated');
+  assert.equal((await client.signIn(credentials('alex', 'QA-B', 'Second-company-fixture-only'))).kind, 'authenticated');
+});
+
+await test('phone recovery uses the phone on the account and rejects repeated failed codes', async () => {
+  const issued = await client.startRecovery({ companyCode: 'QA-A', username: 'phone', channel: 'sms', phone: '+12025550199' });
+  const code = await delivered('sms', '+12025550108');
+  assert.equal((await count('sms', '+12025550199')).length, 0);
+  const bad = code === '444444' ? '555555' : '444444';
+  for (let i = 0; i < 5; i++) assert.equal((await client.verifyRecovery(issued.challengeId, bad)).reason, 'invalid-code');
+  assert.equal((await client.verifyRecovery(issued.challengeId, code)).reason, 'rate-limited');
+  const fresh = await client.startRecovery({ companyCode: 'QA-A', username: 'phone', channel: 'sms' });
+  const verified = await client.verifyRecovery(fresh.challengeId, await delivered('sms', '+12025550108', 1));
+  assert.equal(verified.kind, 'recovery-verified');
+  assert.equal((await client.completeRecovery(verified.resetGrant, 'Replacement-phone-pass')).kind, 'password-changed');
+});

@@ -1,0 +1,129 @@
+package com.velox.itsm.mobileauth;
+
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.Locale;
+import org.json.JSONArray;
+import org.json.JSONObject;
+
+/** ProjectData has no tenant or stable owner field. Every read joins an explicit account grant. */
+final class Projects {
+    private static final int PAGE_SIZE = 30;
+    private static final String SCOPED =
+        "SELECT p.SR_NO, p.PROJECTNAME, p.CUSTOMERNAME, p.FUNCTION_NAME, p.RESPONSIBILITY,"
+        + " p.PRODUCTSUIT, p.PRODUCTTOOL, p.Task_ID FROM scm_mobile_project_access a"
+        + " JOIN ProjectData p ON p.SR_NO=a.PROJECT_ID WHERE a.LOGIN_ID=? AND a.COMPANY_CODE=?";
+
+    private Projects() {}
+
+    static boolean valid(JSONObject input, boolean detail) {
+        if (detail) return input.length() == 1 && positiveId(input.opt("id"));
+        for (String key : input.keySet()) {
+            if ("before".equals(key)) {
+                if (!positiveId(input.opt(key))) return false;
+            } else if ("query".equals(key)) {
+                Object value = input.opt(key);
+                if (!(value instanceof String) || ((String)value).length() > 120) return false;
+            } else return false;
+        }
+        return true;
+    }
+
+    private static boolean positiveId(Object value) {
+        if (!(value instanceof Number)) return false;
+        double id = ((Number)value).doubleValue();
+        return id >= 1 && id <= Integer.MAX_VALUE && id == Math.rint(id);
+    }
+
+    static JSONObject page(Connection db, Accounts.Account account, JSONObject input) throws SQLException {
+        String term = input.optString("query").trim().toLowerCase(Locale.ROOT);
+        boolean hasFilter = !term.isEmpty();
+        boolean hasCursor = input.has("before");
+        String sql = SCOPED + (hasCursor ? " AND p.SR_NO<?" : "") + (hasFilter
+            ? " AND (LOWER(p.PROJECTNAME) LIKE ? ESCAPE '!' OR LOWER(p.CUSTOMERNAME) LIKE ? ESCAPE '!' OR LOWER(p.PRODUCTTOOL) LIKE ? ESCAPE '!')" : "")
+            + " ORDER BY p.SR_NO DESC LIMIT " + (PAGE_SIZE + 1);
+        try (PreparedStatement query = db.prepareStatement(sql)) {
+            bindAccount(query, account);
+            int parameter = 3;
+            if (hasCursor) query.setInt(parameter++, input.getInt("before"));
+            if (hasFilter) {
+                String pattern = "%" + term.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+                for (int i = 0; i < 3; i++) query.setString(parameter++, pattern);
+            }
+            try (ResultSet rows = query.executeQuery()) {
+                JSONArray projects = new JSONArray();
+                int last = 0;
+                while (projects.length() < PAGE_SIZE && rows.next()) {
+                    projects.put(row(rows));
+                    last = rows.getInt("SR_NO");
+                }
+                Object next = projects.length() == PAGE_SIZE && rows.next() ? last : JSONObject.NULL;
+                return new JSONObject().put("kind", "projects").put("items", projects).put("next", next);
+            }
+        }
+    }
+
+    static JSONObject detail(Connection db, Accounts.Account account, int id) throws SQLException {
+        try (PreparedStatement query = db.prepareStatement(SCOPED + " AND p.SR_NO=?")) {
+            bindAccount(query, account);
+            query.setInt(3, id);
+            try (ResultSet rows = query.executeQuery()) {
+                return rows.next() ? new JSONObject().put("kind", "project").put("item", row(rows)) : null;
+            }
+        }
+    }
+
+    static JSONObject records(Connection db, Accounts.Account account, int id) throws SQLException {
+        if (detail(db, account, id) == null) return null;
+        return new JSONObject().put("kind", "project-records")
+            .put("projectId", id)
+            .put("requirements", linkedRecords(db, account, id, "requirement", "requirementDocument", "d.rd_id", "d.RDStatus", "''"))
+            .put("understanding", linkedRecords(db, account, id, "understanding", "UnderstandingDocument", "d.ud_id", "d.UDStatus", "''"))
+            .put("kickoff", linkedRecords(db, account, id, "kickoff", "ProjectKickOfMeeting", "''", "d.Status", "d.TypesMeeting"));
+    }
+
+    private static JSONObject linkedRecords(Connection db, Accounts.Account account, int id, String kind,
+                                            String table, String reference, String status, String format) throws SQLException {
+        // Only the three static query definitions above select identifiers or expressions.
+        String sql = "SELECT d.SR_NO, " + reference + " AS REFERENCE_CODE, " + status + " AS RECORD_STATUS,"
+            + " d.Date AS RECORD_DATE, " + format + " AS MEETING_FORMAT FROM scm_mobile_project_access a"
+            + " JOIN scm_mobile_project_record l ON l.PROJECT_ID=a.PROJECT_ID AND l.COMPANY_CODE=a.COMPANY_CODE"
+            + " JOIN " + table + " d ON d.SR_NO=l.RECORD_ID"
+            + " WHERE a.LOGIN_ID=? AND a.COMPANY_CODE=? AND a.PROJECT_ID=? AND l.RECORD_KIND=?"
+            + " ORDER BY d.SR_NO DESC LIMIT 21";
+        try (PreparedStatement query = db.prepareStatement(sql)) {
+            bindAccount(query, account);
+            query.setInt(3, id);
+            query.setString(4, kind);
+            try (ResultSet rows = query.executeQuery()) {
+                JSONArray items = new JSONArray();
+                while (items.length() < 20 && rows.next()) {
+                    items.put(new JSONObject().put("id", rows.getInt("SR_NO"))
+                        .put("reference", label(rows, "REFERENCE_CODE")).put("date", label(rows, "RECORD_DATE"))
+                        .put("status", label(rows, "RECORD_STATUS")).put("format", label(rows, "MEETING_FORMAT")));
+                }
+                return new JSONObject().put("items", items).put("hasMore", items.length() == 20 && rows.next());
+            }
+        }
+    }
+
+    private static void bindAccount(PreparedStatement query, Accounts.Account account) throws SQLException {
+        query.setInt(1, account.id);
+        query.setString(2, account.companyCode);
+    }
+
+    private static JSONObject row(ResultSet row) throws SQLException {
+        return new JSONObject().put("id", row.getInt("SR_NO"))
+            .put("name", label(row, "PROJECTNAME")).put("customer", label(row, "CUSTOMERNAME"))
+            .put("function", label(row, "FUNCTION_NAME")).put("responsibility", label(row, "RESPONSIBILITY"))
+            .put("suite", label(row, "PRODUCTSUIT")).put("tool", label(row, "PRODUCTTOOL"))
+            .put("reference", label(row, "Task_ID"));
+    }
+
+    private static String label(ResultSet row, String column) throws SQLException {
+        String value = row.getString(column);
+        return value == null ? "" : value.trim();
+    }
+}
