@@ -83,7 +83,8 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     incident.executeBatch();
                     history.executeBatch();
                 }
-                for (String resource : new String[]{"/var/schema.sql", "/var/schema-projects.sql", "/var/schema-tasks.sql", "/var/schema-project-workspace.sql", "/var/schema-task-assignment.sql"}) {
+                for (String resource : new String[]{"/var/schema.sql", "/var/schema-projects.sql", "/var/schema-tasks.sql", "/var/schema-project-workspace.sql",
+                        "/var/schema-task-assignment.sql", "/var/schema-project-creation.sql"}) {
                     try (InputStream stream = QA.class.getResourceAsStream(resource); Scanner schema = new Scanner(stream, "UTF-8").useDelimiter("\\A")) {
                         for (String statement : schema.next().split(";")) if (!statement.trim().isEmpty()) sql.execute(statement);
                     }
@@ -100,6 +101,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 seed(connection, 9, "schedule-lead", "Leah Thomas", "Developer", "Non-AD", "leah@fixture.invalid", "+12025550109", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 10, "schedule-manager", "Raj Nair", "Implementor", "Non-AD", "raj@fixture.invalid", "+12025550110", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 11, "schedule-assignee", "Mira Desai", "Tester", "Non-AD", "mira@fixture.invalid", "+12025550111", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 12, "project-creator", "Anika Mehta", "Implementor", "Non-AD", "anika@fixture.invalid", "+12025550112", "QA Service Operations", "QA-A", "off", hash, null, true);
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Pune', BRANCH='West office', DEPARTMENT='Commercial operations', SUB_DEPARTMENT='Delivery' WHERE LOGINID=1");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Chennai', BRANCH='South office', DEPARTMENT='Engineering' WHERE LOGINID=2");
                 sql.execute("CREATE TABLE ProjectData (SR_NO INT PRIMARY KEY, PROJECTNAME VARCHAR(500), CUSTOMERNAME VARCHAR(500), FUNCTION_NAME VARCHAR(500), RESPONSIBILITY VARCHAR(500), PRODUCTSUIT VARCHAR(500), PRODUCTTOOL VARCHAR(500), Task_ID VARCHAR(500))");
@@ -110,6 +112,15 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " (51,'Warehouse Inventory','Valley Logistics','Stock control','Warehouse onboarding','SCM Operations','Stock Review','PM-1051'),"
                     + " (52,'Unassigned Project','Valley Logistics',NULL,NULL,NULL,NULL,NULL)");
                 sql.execute("INSERT INTO scm_mobile_project_access VALUES (1,'QA-A',41), (1,'QA-A',43), (1,'QA-A',44), (2,'QA-B',51), (1,'QA-B',52)");
+                sql.execute("ALTER TABLE ProjectData ADD SUBMITTEDBY VARCHAR(128)");
+                sql.execute("CREATE TABLE FunctionMaster (SR_NO INT PRIMARY KEY, MODULE VARCHAR(120), FUNCTION_NAME VARCHAR(240))");
+                sql.execute("INSERT INTO FunctionMaster VALUES (1,'PMS','Access rollout'),(2,'PMS','Development'),(3,'PMS','Implementation')");
+                sql.execute("INSERT INTO scm_mobile_project_create_context (LOGIN_ID,COMPANY_CODE,CUSTOMER,PRODUCT_SUITE,PRODUCT_TOOL) VALUES"
+                    + " (8,'QA-A','Harbor Clinic','Endpoint Protection','Device Security'),"
+                    + " (12,'QA-A','Harbor Clinic','Endpoint Protection','Device Security'),"
+                    + " (12,'QA-A','Riverside Works','Service Operations','VPN Access'),"
+                    + " (12,'QA-B','Valley Logistics','Service Operations','Warehouse access')");
+                sql.execute("ALTER TABLE scm_mobile_project_submission ADD CHECK (REQUEST_KEY<>'qa-project-receipt-failure-0001')");
                 sql.execute("CREATE TABLE requirementDocument (SR_NO INT PRIMARY KEY, rd_id VARCHAR(120), RDStatus VARCHAR(120), Date VARCHAR(120))");
                 sql.execute("CREATE TABLE UnderstandingDocument (SR_NO INT PRIMARY KEY, ud_id VARCHAR(120), UDStatus VARCHAR(120), Date VARCHAR(120))");
                 sql.execute("CREATE TABLE ProjectKickOfMeeting (SR_NO INT PRIMARY KEY, Status VARCHAR(120), Date VARCHAR(120), TypesMeeting VARCHAR(120))");
@@ -199,6 +210,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " ('Ari Shah','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access'),"
                     + " ('Dev Singh','Dev Singh','Gia Gupta','Harbor Clinic','Endpoint Protection','Device Security'),"
                     + " ('Noor Paul','Dev Singh','Gia Gupta','Harbor Clinic','Endpoint Protection','Device Security'),"
+                    + " ('Dev Singh','Dev Singh','Anika Mehta','Harbor Clinic','Endpoint Protection','Device Security'),"
                     + " ('Ari Shah','Dev Singh','Gia Gupta','Disabled Roster','Service Operations','Email'),"
                     + " ('Noor Paul','Noor Paul','Maya Sen','Other Roster','Service Operations','Endpoint')");
             }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
-import { AuthError, type Grant } from '../scm/auth-api';
+import { AuthError, submissionKey, type Grant } from '../scm/auth-api';
 import { authClient } from '../scm/auth-config';
 import { useProtectedRead } from '../scm/protected-read';
 import { useSession } from '../scm/session';
@@ -12,11 +12,6 @@ import { color } from './theme';
 
 const priorities = ['Low', 'Normal', 'High', 'Immediate'] as const;
 const steps = ['Assignee', 'Details', 'Schedule'];
-
-function submissionKey() {
-  const nonce = () => Math.random().toString(36).slice(2).padEnd(11, '0');
-  return [Date.now().toString(36), nonce(), nonce()].join('-');
-}
 
 function message(error: unknown) {
   const code = error instanceof AuthError ? error.code : null;

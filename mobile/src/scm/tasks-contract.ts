@@ -92,7 +92,7 @@ export function decodeTaskAssignees(value: unknown) {
   return { id: body.id, revision: body.revision, items, hasMore: body.hasMore, context: decodeTaskContext(body.context) };
 }
 
-function decodeTaskContext(value: unknown): TaskContext | null {
+export function decodeTaskContext(value: unknown): TaskContext | null {
   const row = object(value);
   const { customer, suite, tool } = row ?? {};
   if (!label(customer) || !customer || customer.length > 240 || !label(suite) || !suite || suite.length > 240

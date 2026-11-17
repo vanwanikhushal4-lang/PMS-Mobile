@@ -21,7 +21,7 @@ export default function ProjectDetailScreen() {
   const canReadTasks = state.kind === 'active' && state.session.identity.capabilities.includes('tasks.assigned-by-me');
   const [pane, setPane] = useState({ index: 0, shift: 0 });
   const records = !canReadTasks || pane.index === 3;
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, created } = useLocalSearchParams<{ id: string; created?: string }>();
   const idNumber = typeof id === 'string' && /^[1-9]\d{0,9}$/.test(id) ? Number(id) : 0;
   const projectId = idNumber <= 2_147_483_647 ? idNumber : 0;
   const read = useCallback((grant: Grant, signal: AbortSignal) => {
@@ -39,6 +39,7 @@ export default function ProjectDetailScreen() {
     </BrandedTopBar>
     <View style={styles.content}>
       {item ? <Phase>
+        {created === '1' ? <Text accessibilityLiveRegion="polite" style={styles.success}>Project created</Text> : null}
         <View style={styles.heading}>
           <View style={styles.referenceRow}>
             {item.reference ? <Text style={type.eyebrow}>{item.reference}</Text> : <View />}
@@ -88,6 +89,7 @@ function ProjectRecordsPane({ id }: { id: number }) {
 const styles = StyleSheet.create({
   content: { gap: 20, marginTop: 12 },
   heading: { gap: 8 },
+  success: { color: color.success, fontSize: 16, fontWeight: '600' },
   referenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: 12 },
   title: { color: color.text, fontSize: 30, lineHeight: 36, letterSpacing: -0.6, fontWeight: '700' },
   section: { gap: 12 },

@@ -1,3 +1,5 @@
+import { decodeTaskContext, type TaskContext } from './tasks-contract.ts';
+
 export type Project = {
   id: number;
   name: string;
@@ -10,6 +12,7 @@ export type Project = {
   favorite: boolean;
 };
 export type ProjectPage = { items: Project[]; next: number | null };
+export type ProjectDraft = { name: string; function: string; responsibility: string; context: TaskContext; requestKey: string };
 export type Profile = { email: string; phone: string; location: string; site: string; department: string; subdepartment: string };
 export type ProjectRecord = { id: number; reference: string; date: string; status: string; format: string };
 export type ProjectRecordGroup = { items: ProjectRecord[]; hasMore: boolean };
@@ -44,6 +47,34 @@ function project(value: unknown): Project | null {
 export function decodeProject(value: unknown): Project | null {
   const body = object(value);
   return body?.kind === 'project' ? project(body.item) : null;
+}
+
+export function decodeCreatedProject(value: unknown): Project | null {
+  const body = object(value);
+  return body?.kind === 'project-created' ? project(body.item) : null;
+}
+
+export function decodeProjectCreateOptions(value: unknown) {
+  const body = object(value);
+  if (body?.kind !== 'project-create-options' || typeof body.moreContexts !== 'boolean' || typeof body.moreFunctions !== 'boolean'
+    || !Array.isArray(body.contexts) || body.contexts.length > 30 || !Array.isArray(body.functions) || body.functions.length > 30
+    || (body.moreContexts && body.contexts.length !== 30) || (body.moreFunctions && body.functions.length !== 30)
+    || !Array.isArray(body.responsibilities) || !body.responsibilities.length || body.responsibilities.length > 30) return null;
+  const contexts: TaskContext[] = [];
+  for (const raw of body.contexts as unknown[]) {
+    const context = decodeTaskContext(raw);
+    if (!context) return null;
+    contexts.push(context);
+  }
+  const functions: string[] = [];
+  const responsibilities: string[] = [];
+  for (const [raw, choices] of [[body.functions, functions], [body.responsibilities, responsibilities]] as const) {
+    for (const name of raw as unknown[]) {
+      if (typeof name !== 'string' || !name || name.length > 240 || choices.includes(name)) return null;
+      choices.push(name);
+    }
+  }
+  return { contexts, functions, responsibilities, moreContexts: body.moreContexts, moreFunctions: body.moreFunctions };
 }
 
 export function decodeProjects(value: unknown): ProjectPage | null {

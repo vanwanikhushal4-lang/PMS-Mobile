@@ -19,7 +19,7 @@ final class TaskAssignments {
     private static final BigDecimal HUNDRED = BigDecimal.valueOf(100);
     private static final String[] DRAFT_TEXT = {"module", "description", "start", "due", "priority", "weight", "candidate", "requestKey"};
     private static final List<String> FUNCTIONS = java.util.Arrays.asList("Development", "Testing", "POC", "UAT", "Implementation", "Go Live", "Other");
-    private static final List<String> RESPONSIBILITIES = java.util.Arrays.asList("Velox Solution", "End Customer");
+    static final List<String> RESPONSIBILITIES = java.util.Collections.unmodifiableList(java.util.Arrays.asList("Velox Solution", "End Customer"));
     private static final String GRANT = "INSERT INTO scm_mobile_task_access (LOGIN_ID,COMPANY_CODE,TASK_ID) VALUES (?,?,?)"
         + " ON DUPLICATE KEY UPDATE LOGIN_ID=?";
 

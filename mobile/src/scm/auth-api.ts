@@ -1,6 +1,7 @@
 import { decodeAuthStep, type AuthStep } from './auth-contract.ts';
 import { decodeWorkspace } from './workspace-contract.ts';
-import { decodeProfile, decodeProject, decodeProjectRecords, decodeProjects } from './projects-contract.ts';
+import { decodeCreatedProject, decodeProfile, decodeProject, decodeProjectCreateOptions, decodeProjectRecords, decodeProjects,
+  type ProjectDraft } from './projects-contract.ts';
 import { decodeAssignedTasks, decodeTaskAssignees, decodeTaskContexts, decodeTaskDates, decodeWorkLog,
   type DateApproval, type DateProposal, type DateQueue, type StandaloneTask, type TaskContext, type TaskDraft, type TaskTransfer } from './tasks-contract.ts';
 
@@ -32,7 +33,8 @@ export function resolveAuthConfig(value: string | undefined, allowFixture = fals
 export class AuthError extends Error {
   readonly code: 'transport' | 'bad-response' | 'expired' | 'unavailable' | 'forbidden' | 'not-found' | 'progress-already-logged' | 'task-closed'
     | 'date-range' | 'date-reason-length' | 'date-change-conflict' | 'date-no-reviewer'
-    | 'invalid-task-draft' | 'task-weight-limit' | 'task-assignment-conflict' | 'candidate-unavailable';
+    | 'invalid-task-draft' | 'task-weight-limit' | 'task-assignment-conflict' | 'candidate-unavailable'
+    | 'invalid-project-draft' | 'project-context-unavailable' | 'project-function-unavailable' | 'project-request-conflict' | 'project-duplicate';
   readonly taskId?: number;
   constructor(code: AuthError['code'], taskId?: number) { super(code); this.name = 'AuthError'; this.code = code; this.taskId = taskId; }
 }
@@ -78,6 +80,11 @@ function validTaskId(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647;
 }
 
+export function submissionKey() {
+  const nonce = () => Math.random().toString(36).slice(2).padEnd(11, '0');
+  return [Date.now().toString(36), nonce(), nonce()].join('-');
+}
+
 function confirmedBatch(result: unknown, kind: string, items: readonly { id: number }[]) {
   const data = jsonObject(result);
   const expected = items.map((item) => item.id).sort((a, b) => a - b);
@@ -120,6 +127,13 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       if (response.status === 429) return { kind: 'rejected', reason: 'rate-limited' };
       if (!response.headers.get('content-type')?.toLowerCase().startsWith('application/json')) throw new AuthError('bad-response');
       const data = await response.json().catch(() => { throw new AuthError('bad-response'); });
+      if (path === 'projects/create' && (response.status === 400 || response.status === 409)) {
+        const { kind, reason } = jsonObject(data);
+        if (kind === 'rejected' && (reason === 'invalid-project-draft' || reason === 'project-context-unavailable'
+          || reason === 'project-function-unavailable' || reason === 'project-request-conflict' || reason === 'project-duplicate')) {
+          throw new AuthError(reason);
+        }
+      }
       if (path === 'tasks/progress' && response.status === 409) {
         const { kind, reason } = jsonObject(data);
         if (kind === 'rejected' && (reason === 'progress-already-logged' || reason === 'task-closed')) throw new AuthError(reason);
@@ -286,6 +300,19 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       confirmedBatch(data, 'tasks-reassigned', items);
     },
     signOut: async (grant: Grant, signal?: AbortSignal) => { await request('sign-out', {}, signal, grant.sessionToken); },
+    projectCreateOptions: async (grant: Grant, filters: { query?: string; functionQuery?: string }, signal?: AbortSignal) => {
+      const data = decodeProjectCreateOptions(await request('projects/create-options', filters, signal, grant.sessionToken));
+      if (!data) throw new AuthError('bad-response');
+      return data;
+    },
+    createProject: async (grant: Grant, draft: ProjectDraft, signal?: AbortSignal) => {
+      const data = decodeCreatedProject(await request('projects/create', draft, signal, grant.sessionToken));
+      if (!data || data.name !== draft.name.trim() || data.customer !== draft.context.customer || data.tool !== draft.context.tool
+          || data.suite !== draft.context.suite || data.function !== draft.function || data.responsibility !== draft.responsibility) {
+        throw new AuthError('bad-response');
+      }
+      return data;
+    },
     startRecovery: async (details: { companyCode: string; username: string; channel: 'email' | 'sms' }, signal?: AbortSignal) => decodeRecovery(await request('recovery/start', details, signal)),
     verifyRecovery: async (challengeId: string, code: string, signal?: AbortSignal) => decodeRecovery(await request('recovery/verify', { challengeId, code }, signal)),
     completeRecovery: async (resetGrant: string, password: string, signal?: AbortSignal) => decodeRecovery(await request('recovery/complete', { resetGrant, password }, signal)),

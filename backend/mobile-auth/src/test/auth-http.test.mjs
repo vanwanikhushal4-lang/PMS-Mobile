@@ -494,6 +494,71 @@ await test('team schedule proposals and approvals apply each batch atomically', 
   }
 });
 
+await test('an authorized creator can save a first project and use the new workspace', async () => {
+  const client = createAuthClient(resolveAuthConfig(datesBase, true));
+  const creator = await client.signIn(credentials('project-creator'));
+  const viewer = await client.signIn(credentials('alex'));
+  const otherCompany = await client.signIn(credentials('alex', 'QA-B', 'Second-company-fixture-only'));
+  for (const account of [creator, viewer, otherCompany]) assert.equal(account.kind, 'authenticated');
+  for (const capability of ['projects.read', 'projects.create', 'tasks.create']) {
+    assert.ok(creator.session.identity.capabilities.includes(capability));
+  }
+  assert.deepEqual((await client.projects(creator.grant, {})).items, []);
+  assert.ok(viewer.session.identity.capabilities.includes('projects.read'));
+  assert.ok(!viewer.session.identity.capabilities.includes('projects.create'));
+  await assert.rejects(() => client.projectCreateOptions(viewer.grant, {}), { code: 'forbidden' });
+  const options = await client.projectCreateOptions(creator.grant, {});
+  assert.deepEqual(options.contexts.map(({ customer }) => customer), ['Harbor Clinic', 'Riverside Works']);
+  assert.deepEqual(options.functions, ['Access rollout', 'Development', 'Implementation']);
+  assert.deepEqual(options.responsibilities, ['Velox Solution', 'End Customer']);
+  const scoped = await client.projectCreateOptions(creator.grant, { query: 'device security', functionQuery: 'implement' });
+  assert.deepEqual(scoped.contexts, [options.contexts[0]]);
+  assert.deepEqual(scoped.functions, ['Implementation']);
+  assert.deepEqual((await client.projectCreateOptions(creator.grant, { query: '%' })).contexts, []);
+
+  const draft = {
+    name: 'Harbor device rollout & validation', function: 'Development', responsibility: 'End Customer',
+    context: options.contexts[0], requestKey: 'qa-project-concurrent-save-0001',
+  };
+  await assert.rejects(() => client.createProject(viewer.grant, draft), { code: 'forbidden' });
+  await assert.rejects(() => client.createProject(otherCompany.grant, draft), { code: 'forbidden' });
+  await assert.rejects(() => client.createProject(creator.grant, { ...draft,
+    context: { customer: 'Valley Logistics', suite: 'Service Operations', tool: 'Warehouse access' } }), { code: 'project-context-unavailable' });
+  await assert.rejects(() => client.createProject(creator.grant, { ...draft, function: 'Unconfigured' }), { code: 'project-function-unavailable' });
+  await assert.rejects(() => client.createProject(creator.grant, { ...draft, name: '' }), { code: 'invalid-project-draft' });
+  await assert.rejects(() => client.createProject(creator.grant, { ...draft, name: 'Paging test project',
+    context: options.contexts[1], function: 'Access rollout' }), { code: 'project-duplicate' });
+
+  const [created, retry] = await Promise.all([client.createProject(creator.grant, draft), client.createProject(creator.grant, draft)]);
+  assert.deepEqual(created, retry);
+  assert.equal(created.name, draft.name);
+  assert.equal(created.reference, 'Harbor Clinic-' + created.id);
+  assert.deepEqual((await client.projects(creator.grant, {})).items, [created]);
+  assert.deepEqual(await client.project(creator.grant, created.id), created);
+  await assert.rejects(() => client.project(viewer.grant, created.id), { code: 'not-found' });
+  await assert.rejects(() => client.project(otherCompany.grant, created.id), { code: 'not-found' });
+  await assert.rejects(() => client.createProject(creator.grant, { ...draft, name: 'Modified draft' }), { code: 'project-request-conflict' });
+  await assert.rejects(() => client.createProject(creator.grant, { ...draft, requestKey: 'qa-project-duplicate-scope-001' }), { code: 'project-duplicate' });
+  assert.deepEqual((await client.projectRecords(creator.grant, created.id)).requirements.items, []);
+  assert.deepEqual((await client.projectTasks(creator.grant, created.id, {})).items, []);
+  const roster = await client.assignees(creator.grant, created.id, true);
+  const assigned = await client.createTask(creator.grant, created.id, {
+    module: 'Inspect received devices', description: 'Review the inventory before validation.', start: '17.11.2026', due: '20.11.2026',
+    priority: 'Normal', weight: '10', candidate: roster.items.find(({ name }) => name === 'Anika Mehta').key,
+    requestKey: 'qa-project-first-task-save-0001',
+  });
+  assert.deepEqual((await client.projectTasks(creator.grant, created.id, {})).items.map(({ id, developer }) => [id, developer]),
+    [[assigned, 'Anika Mehta']]);
+  await client.setProjectFavorite(creator.grant, created.id, true);
+  assert.equal((await client.projects(creator.grant, { saved: true })).items[0].id, created.id);
+
+  const rollback = { ...draft, name: 'Receipt rollback specimen', requestKey: 'qa-project-receipt-failure-0001' };
+  await assert.rejects(() => client.createProject(creator.grant, rollback), { code: 'unavailable' });
+  assert.deepEqual((await client.projects(creator.grant, { query: rollback.name })).items, []);
+  const recovered = await client.createProject(creator.grant, { ...rollback, requestKey: 'qa-project-receipt-retry-0001' });
+  assert.equal(recovered.id, created.id + 1);
+});
+
 await test('authenticator enrollment generates a usable secret and prevents reusing a time slot', async () => {
   const first = await client.signIn(credentials('enroll'));
   assert.equal(first.kind, 'enrollment');

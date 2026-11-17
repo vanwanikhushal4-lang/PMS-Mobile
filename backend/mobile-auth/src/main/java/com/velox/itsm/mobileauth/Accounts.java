@@ -18,6 +18,7 @@ public final class Accounts {
     private static final String READ = "SELECT l.LOGINID, l.USERNAME, l.FULL_NAME, l.ROLE_TYPE, l.DESIGNATION, l.LOGIN_TYPE, l.EMAIL, l.PHONE,"
         + " c.COMPANY_CODE, c.COMPANY_NAME, m.PASSWORD_HASH, m.MFA_MODE, m.TOTP_ENCRYPTED, m.REVISION,"
         + " EXISTS(SELECT 1 FROM scm_mobile_project_access a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS PROJECT_ACCESS,"
+        + " EXISTS(SELECT 1 FROM scm_mobile_project_create_context a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS PROJECT_CREATE,"
         + " EXISTS(SELECT 1 FROM scm_mobile_task_access a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS TASK_ACCESS"
         + " FROM scm_mobile_account m JOIN LOGINMASTER l ON l.LOGINID=m.LOGIN_ID"
         + " JOIN company_code_master c ON c.COMPANY_CODE=m.COMPANY_CODE AND c.COMPANY_NAME=l.COMPANY"
@@ -72,7 +73,19 @@ public final class Accounts {
                 case "projects/records": return Projects.records(db, account, input.getInt("id"));
                 case "projects/tasks": return AssignedTasks.projectPage(db, account, input);
                 case "projects/favorite": return Projects.favorite(db, account, input.getInt("id"), input.getBoolean("favorite"));
+                case "projects/create-options": return ProjectCreation.options(db, account, input.optString("query"), input.optString("functionQuery"));
                 default: return Projects.page(db, account, input);
+            }
+        }
+    }
+
+    JSONObject createProject(Account account, JSONObject input) throws SQLException {
+        for (int attempt = 0; ; attempt++) {
+            try (Connection db = source.getConnection()) {
+                return ProjectCreation.create(db, account, input);
+            } catch (SQLException failure) {
+                // The legacy writer allocates its ID without the mobile lock.
+                if (!allocationCollision(failure) || attempt >= 2) throw failure;
             }
         }
     }
@@ -107,10 +120,13 @@ public final class Accounts {
                 return TaskAssignments.create(db, account, input, when);
             } catch (SQLException failure) {
                 // A legacy MAX+1 writer does not take the mobile allocator lock.
-                boolean retry = "40001".equals(failure.getSQLState()) || "23505".equals(failure.getSQLState()) || failure.getErrorCode() == 1062;
-                if (!retry || attempt >= 2) throw failure;
+                if (!allocationCollision(failure) || attempt >= 2) throw failure;
             }
         }
+    }
+
+    private static boolean allocationCollision(SQLException failure) {
+        return "40001".equals(failure.getSQLState()) || "23505".equals(failure.getSQLState()) || failure.getErrorCode() == 1062;
     }
 
     JSONObject reassignTask(Account account, int id, String revision, String candidate) throws SQLException {
@@ -212,11 +228,13 @@ public final class Accounts {
         final int id;
         final long revision;
         final boolean projectAccess;
+        final boolean projectCreate;
         final boolean taskAccess;
         final String username, fullname, role, designation, companyCode, companyName, email, phone, kind, mode, passwordHash, totp;
         Account(ResultSet data) throws SQLException {
             id = data.getInt("LOGINID"); revision = data.getLong("REVISION");
             projectAccess = data.getBoolean("PROJECT_ACCESS");
+            projectCreate = data.getBoolean("PROJECT_CREATE");
             taskAccess = data.getBoolean("TASK_ACCESS");
             username = clean(data, "USERNAME"); fullname = clean(data, "FULL_NAME"); role = clean(data, "ROLE_TYPE");
             designation = clean(data, "DESIGNATION"); companyCode = clean(data, "COMPANY_CODE"); companyName = clean(data, "COMPANY_NAME");
@@ -229,12 +247,14 @@ public final class Accounts {
                 && ("off".equals(mode) || "sms".equals(mode) || "totp".equals(mode));
         }
         boolean directory() { return "AD".equalsIgnoreCase(kind); }
+        boolean projectWorkspace() { return projectAccess || projectCreate; }
         boolean taskWorkspace() { return taskAccess || TaskRoster.canCreate(this); }
         JSONObject identity() {
             JSONArray capabilities = new JSONArray();
-            if (projectAccess) capabilities.put("projects.read");
+            if (projectWorkspace()) capabilities.put("projects.read");
+            if (projectCreate) capabilities.put("projects.create");
             if (taskWorkspace()) capabilities.put("tasks.assigned-by-me").put("tasks.assigned-to-me");
-            if (projectAccess && TaskRoster.canCreate(this)) capabilities.put("tasks.create");
+            if (projectWorkspace() && TaskRoster.canCreate(this)) capabilities.put("tasks.create");
             if (TaskRoster.canCreate(this)) capabilities.put("tasks.create-standalone");
             return new JSONObject().put("username", username).put("displayName", fullname).put("role", role).put("designation", designation)
                 .put("companyCode", companyCode).put("companyName", companyName).put("capabilities", capabilities);

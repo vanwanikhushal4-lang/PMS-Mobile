@@ -52,6 +52,7 @@ public final class AuthService implements AutoCloseable {
         switch (action) {
             case "session": case "sign-out": case "workspace": case "profile":
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
+            case "projects/create-options": case "projects/create":
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
@@ -231,6 +232,7 @@ public final class AuthService implements AutoCloseable {
                 result = profile == null ? rejected(401, "expired") : reply(200, profile);
                 break;
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
+            case "projects/create-options": case "projects/create":
                 result = projects(action, input, key, account, now);
                 break;
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
@@ -249,9 +251,17 @@ public final class AuthService implements AutoCloseable {
     }
 
     private Reply projects(String action, JSONObject input, String key, Account account, long now) throws SQLException {
-        if (!account.projectAccess || ("projects/tasks".equals(action) && !account.taskWorkspace())) return rejected(403, "forbidden");
+        boolean creating = "projects/create".equals(action);
+        boolean options = "projects/create-options".equals(action);
+        if (!account.projectWorkspace() || ((creating || options) && !account.projectCreate)
+                || ("projects/tasks".equals(action) && !account.taskWorkspace())) return rejected(403, "forbidden");
         if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
-        if (!Projects.valid(input, action)) return rejected(400, "invalid-filter");
+        if (creating) {
+            if (!ProjectCreation.validDraft(input)) return rejected(400, "invalid-project-draft");
+            JSONObject result = accounts.createProject(account, input);
+            return reply("project-created".equals(result.getString("kind")) ? 200 : 409, result);
+        }
+        if (!(options ? ProjectCreation.validOptions(input) : Projects.valid(input, action))) return rejected(400, "invalid-filter");
         JSONObject projects = accounts.projects(account, input, action);
         return projects == null ? rejected(404, "project-not-found") : reply(200, projects);
     }
