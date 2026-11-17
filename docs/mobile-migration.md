@@ -52,10 +52,12 @@ For each feature record the legacy entry, role/scope, inputs, states and side ef
 | Legacy entry | Native coverage | Open work |
 | --- | --- | --- |
 | `GET /PMS/getSavedProjectData`, `POST /PMS/saveDataFromMobDevice` | Projects lists granted `ProjectData` rows and supports search, bookmarks, and project creation. Creators choose an authorized customer and product, a configured SCM function, and the responsibility. The app opens the saved project directly, and the service grants its creator access in the same transaction. | Provision creator scopes from reviewed legacy assignments and verify concurrent writes against staging MySQL. |
-| `/Admin/PMS`, `/PMS/getProjectDetails1`, `/PMS/getApprovePO` | The original Publish Project screen navigates purchase order records. | Port the purchase order tree and publishing workflow. |
+| `/Admin/PMS`, `/PMS/getProjectDetails1`, `/PMS/getApprovePO`, `/PMS/getPoByCustomerName`, `/PMS/getimplformcdetails`, `/PMS/getAssignTaskDetails` | **Projects → Publish Project** browses function, suite, tool, and customer with scoped completed weight. It opens granted purchase orders, their verified Form C milestones and contacts, and scoped related tasks. A verified linked project opens its workspace. | Provision and verify the order and Form C links on staging MySQL. PO and Form C files and the original bulk task entry remain open. |
 | `/Admin/RequirementDoc`, `/Admin/UnderstandingDoc`, `/PMS/getProjectKickMeetingTable` | The project’s Records tab shows separately linked requirement documents, understanding documents and kickoff records, scoped to the project and company. It shows up to 20 per category with an explicit limit when more exist. | Document content, attachment transfers, approval and revision actions, kickoff scheduling, invite delivery and publishing remain open. |
 
 The iPhone simulator opened Projects for a creator with an empty list, saved Harbor device rollout, and reopened it from the list with its SCM reference and classification. The isolated HTTP tests cover the creation grant, catalog scope, legacy duplicates, concurrent retries, rollback, visibility, bookmarking, and creating a task in the new project.
+
+The iPhone simulator followed Development, Service Operations, and VPN Access to Riverside Works and showed 35.25% completed weight. It opened PO-910, displayed the linked Form C and three authorized tasks, and opened the linked project. A separate customer with completed work showed the empty purchase order state. The isolated HTTP suite also checks cross-company denial, hidden tasks, Form C link validation, and the legacy exclusion of customer groups above 100.
 
 ## Step 5 coverage
 

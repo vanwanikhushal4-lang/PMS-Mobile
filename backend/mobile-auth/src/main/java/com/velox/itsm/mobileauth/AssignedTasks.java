@@ -19,7 +19,7 @@ final class AssignedTasks {
     static final String OWNED_HISTORY = SCOPED + MINE + " AND (" + PENDING + " OR t.STATUS='Completed')";
     private static final String TASK_FIELDS = "SELECT t.SR_NO, t.STATUS, t.CUSTOMERNAME, t.PRODUCTSUIT, t.PRODUCTTOOL,"
         + " t.DESCRIPTION, t.MODULE_NAME, t.TEAM_LEADER, t.DEVELOPER_NAME, t.ASSIGNBY, t.START_DATE, t.END_DATE,"
-        + " t.updateDate_Status, t.MANAGER_NAME, t.Task_ID, t.PRIORITY, t.WEIGHTAGE, t.FUNCTION_NAME, t.RESPONSIBILITY";
+        + " t.updateDate_Status, t.MANAGER_NAME, t.Task_ID, t.PRIORITY, t.WEIGHTAGE, t.FUNCTION_NAME, t.RESPONSIBILITY,t.Assign_date";
     private static final int LOG_LIMIT = 20;
 
     private AssignedTasks() {}
@@ -118,6 +118,23 @@ final class AssignedTasks {
         }
     }
 
+    static JSONObject orderPage(Connection db, Accounts.Account account, int order, int before) throws SQLException {
+        if (!PublishedProjects.hasOrder(db, account, order)) return null;
+        String sql = TASK_FIELDS + SCOPED + " AND EXISTS(SELECT 1" + PublishedProjects.ORDER_SCOPE + PublishedProjects.ORDER_FILTER
+            + " AND p.SR_NO=? AND TRIM(p.customername)=TRIM(t.CUSTOMERNAME)"
+            + " AND TRIM(p.ProductSuitName)=TRIM(t.PRODUCTSUIT) AND TRIM(p.SecurityToolName)=TRIM(t.PRODUCTTOOL))"
+            + (before == 0 ? "" : " AND t.SR_NO<?") + " ORDER BY t.SR_NO DESC LIMIT " + (PAGE_SIZE + 1);
+        try (PreparedStatement query = db.prepareStatement(sql)) {
+            query.setInt(1, account.id);
+            query.setString(2, account.companyCode);
+            query.setInt(3, account.id);
+            query.setString(4, account.companyCode);
+            query.setInt(5, order);
+            if (before != 0) query.setInt(6, before);
+            return page(query, account).put("orderId", order);
+        }
+    }
+
     private static JSONObject page(PreparedStatement query, Accounts.Account account) throws SQLException {
         return page(query, account, false);
     }
@@ -143,6 +160,7 @@ final class AssignedTasks {
                     .put("dateAccess", dateAccess).put("dateApproval", dateAccess ? dateApproval : "")
                     .put("reference", label(rows, "Task_ID")).put("priority", label(rows, "PRIORITY")).put("weight", label(rows, "WEIGHTAGE"))
                     .put("function", label(rows, "FUNCTION_NAME")).put("responsibility", label(rows, "RESPONSIBILITY"))
+                    .put("assignedAt", label(rows, "Assign_date"))
                     .put("customer", label(rows, "CUSTOMERNAME")).put("suite", label(rows, "PRODUCTSUIT"))
                     .put("tool", label(rows, "PRODUCTTOOL")).put("description", HtmlUtils.htmlUnescape(label(rows, "DESCRIPTION")))
                     .put("lead", lead).put("developer", developer)

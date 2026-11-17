@@ -53,6 +53,7 @@ public final class AuthService implements AutoCloseable {
             case "session": case "sign-out": case "workspace": case "profile":
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
+            case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
@@ -233,6 +234,7 @@ public final class AuthService implements AutoCloseable {
                 break;
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
+            case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
                 result = projects(action, input, key, account, now);
                 break;
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
@@ -251,6 +253,13 @@ public final class AuthService implements AutoCloseable {
     }
 
     private Reply projects(String action, JSONObject input, String key, Account account, long now) throws SQLException {
+        if (action.startsWith("projects/publishing/")) {
+            if (!account.publishingAccess()) return rejected(403, "forbidden");
+            if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
+            if (!PublishedProjects.valid(action, input)) return rejected(400, "invalid-filter");
+            JSONObject publishing = accounts.publishing(account, input, action);
+            return publishing == null ? rejected(404, "publishing-not-found") : reply(200, publishing);
+        }
         boolean creating = "projects/create".equals(action);
         boolean options = "projects/create-options".equals(action);
         if (!account.projectWorkspace() || ((creating || options) && !account.projectCreate)

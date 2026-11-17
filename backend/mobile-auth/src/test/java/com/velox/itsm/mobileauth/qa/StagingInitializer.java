@@ -84,7 +84,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     history.executeBatch();
                 }
                 for (String resource : new String[]{"/var/schema.sql", "/var/schema-projects.sql", "/var/schema-tasks.sql", "/var/schema-project-workspace.sql",
-                        "/var/schema-task-assignment.sql", "/var/schema-project-creation.sql"}) {
+                        "/var/schema-task-assignment.sql", "/var/schema-project-creation.sql", "/var/schema-project-publishing.sql"}) {
                     try (InputStream stream = QA.class.getResourceAsStream(resource); Scanner schema = new Scanner(stream, "UTF-8").useDelimiter("\\A")) {
                         for (String statement : schema.next().split(";")) if (!statement.trim().isEmpty()) sql.execute(statement);
                     }
@@ -102,6 +102,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 seed(connection, 10, "schedule-manager", "Raj Nair", "Implementor", "Non-AD", "raj@fixture.invalid", "+12025550110", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 11, "schedule-assignee", "Mira Desai", "Tester", "Non-AD", "mira@fixture.invalid", "+12025550111", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 12, "project-creator", "Anika Mehta", "Implementor", "Non-AD", "anika@fixture.invalid", "+12025550112", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 13, "publish-reviewer", "Samira Rao", "Implementor", "Non-AD", "samira@fixture.invalid", "+12025550113", "QA Service Operations", "QA-A", "off", hash, null, true);
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Pune', BRANCH='West office', DEPARTMENT='Commercial operations', SUB_DEPARTMENT='Delivery' WHERE LOGINID=1");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Chennai', BRANCH='South office', DEPARTMENT='Engineering' WHERE LOGINID=2");
                 sql.execute("CREATE TABLE ProjectData (SR_NO INT PRIMARY KEY, PROJECTNAME VARCHAR(500), CUSTOMERNAME VARCHAR(500), FUNCTION_NAME VARCHAR(500), RESPONSIBILITY VARCHAR(500), PRODUCTSUIT VARCHAR(500), PRODUCTTOOL VARCHAR(500), Task_ID VARCHAR(500))");
@@ -114,7 +115,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 sql.execute("INSERT INTO scm_mobile_project_access VALUES (1,'QA-A',41), (1,'QA-A',43), (1,'QA-A',44), (2,'QA-B',51), (1,'QA-B',52)");
                 sql.execute("ALTER TABLE ProjectData ADD SUBMITTEDBY VARCHAR(128)");
                 sql.execute("CREATE TABLE FunctionMaster (SR_NO INT PRIMARY KEY, MODULE VARCHAR(120), FUNCTION_NAME VARCHAR(240))");
-                sql.execute("INSERT INTO FunctionMaster VALUES (1,'PMS','Access rollout'),(2,'PMS','Development'),(3,'PMS','Implementation')");
+                sql.execute("INSERT INTO FunctionMaster VALUES (1,'PMS','Access rollout'),(2,'PMS','Development'),(3,'PMS','Implementation'),(4,'PMS','Development planning')");
                 sql.execute("INSERT INTO scm_mobile_project_create_context (LOGIN_ID,COMPANY_CODE,CUSTOMER,PRODUCT_SUITE,PRODUCT_TOOL) VALUES"
                     + " (8,'QA-A','Harbor Clinic','Endpoint Protection','Device Security'),"
                     + " (12,'QA-A','Harbor Clinic','Endpoint Protection','Device Security'),"
@@ -213,6 +214,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " ('Dev Singh','Dev Singh','Anika Mehta','Harbor Clinic','Endpoint Protection','Device Security'),"
                     + " ('Ari Shah','Dev Singh','Gia Gupta','Disabled Roster','Service Operations','Email'),"
                     + " ('Noor Paul','Noor Paul','Maya Sen','Other Roster','Service Operations','Endpoint')");
+                seedPublishing(sql);
             }
             AuthService.Directory directory = (company, username, password) -> "QA-A".equals(company) && "directory".equals(username) && "Synthetic-AD-only-22".equals(password);
             AuthService.Delivery deliver = (channel, destination, code) -> {
@@ -241,6 +243,49 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
     @org.springframework.web.bind.annotation.RestController
     @org.springframework.web.bind.annotation.RequestMapping("/mobile/v1/auth")
     public static class LoopbackController extends AuthController { LoopbackController(AuthService auth) { super(auth, true); } }
+
+    private static void seedPublishing(Statement sql) throws java.sql.SQLException {
+        sql.execute("CREATE TABLE PurchaseOrder (SR_NO INT PRIMARY KEY, vlx_id VARCHAR(120), customername VARCHAR(120),"
+            + " ProductSuitName VARCHAR(120), SecurityToolName VARCHAR(120), purchaseNumber VARCHAR(120), purchaseDate VARCHAR(120),"
+            + " vlx_status VARCHAR(120), Form3_status VARCHAR(120), paymentterms VARCHAR(255), prodliscense VARCHAR(255))");
+        sql.execute("INSERT INTO PurchaseOrder VALUES"
+            + " (901,'PO-910','Riverside Works','Service Operations','VPN Access','RIV-104','16.11.2026','Purchase Order Approved','FORM3 Submitted','Net 30','Enterprise VPN'),"
+            + " (902,'PO-911','Riverside Works','Service Operations','VPN Access','RIV-105','17.11.2026','Purchasing review',NULL,NULL,NULL),"
+            + " (903,'PO-912','Unordered Lab','Service Operations','VPN Access','LAB-101','15.11.2026','Purchase Order Approved',NULL,NULL,NULL),"
+            + " (904,'PO-913','Riverside Works','Endpoint Protection','Device Security','RIV-106','19.11.2026','Manual PO Raised By SI',NULL,NULL,NULL),"
+            + " (905,'RF-914','Riverside Works','Service Operations','VPN Access',NULL,NULL,'Draft',NULL,NULL,NULL),"
+            + " (906,'PO-914','Riverside Works','Service Operations','VPN Access','RIV-900','20.11.2026','Purchase Order Approved',NULL,NULL,NULL)");
+        sql.execute("INSERT INTO scm_mobile_project_access VALUES (13,'QA-A',44)");
+        sql.execute("INSERT INTO scm_mobile_purchase_order_access VALUES (13,'QA-A',901,44),(13,'QA-A',904,51),(13,'QA-A',905,NULL),(13,'QA-B',906,52)");
+        String[] formColumns = ("PROJECT_NAME,T_Date,VP_status,SALES_MANAGER_NAME,CUSTOMER_IMPLEMENTOR_NAME,CUSTOMER_IMPLEMENTOR_CONTACT,"
+            + "CUSTOMER_IMPLEMENTOR_EMAIL,END_CUSTOMER_NAME,END_CUSTOMER_CONTACT,product_license,SERVER_AVAILABILITY,SERVER_RESPONSIBILITY,"
+            + "SERVER_STARTDATE,SERVER_ENDDATE,INSTALL_VELOX_LICENSE,RESPONSIBILTIY_VELOX_LICENSE,VELOX_LICENSE_STARTDATE,VELOX_LICENSE_ENDDATE,"
+            + "UAT_TESTING,RESPONSIBILITY_UAT_TESTING,UAT_STARTDATE,UAT_ENDDATE,PRODUCT_GO_LIVE,RESPONSIBILITY_PRODUCTGOLIVE,"
+            + "PRODUCT_GO_LIVE_STARTDATE,PRODUCT_GO_LIVE_ENDDATE,ROLLOUT,RSPOSINBILITY_ROLLOUT,ROLLOUT_STARTDATE,ROLLOUT_ENDDATE,"
+            + "DEMO_LIVE,RESPONSIBILTY_DEMOLIVE,DEMOLIVE_STARTDATE,DEMOLIVE_ENDDATE,PAYMENT_TERMS,RESPONSIBILITY_PAYMENTTERMS,"
+            + "PAYMENT_TERMS_STARTDATE,PAYMENT_TERMS_ENDDATE,SIGNOFF,RESPONSIBILTY_SIGNOFF,SIGNOFF_STARTDATE,SIGNOFF_ENDDATE").split(",");
+        StringBuilder form = new StringBuilder("CREATE TABLE FORM3 (SR_NO INT PRIMARY KEY, VP_id VARCHAR(120)");
+        for (String column : formColumns) form.append(",").append(column).append(" VARCHAR(255)");
+        sql.execute(form.append(")").toString());
+        sql.execute("INSERT INTO FORM3 (SR_NO,VP_id,PROJECT_NAME,T_Date,VP_status,product_license,CUSTOMER_IMPLEMENTOR_NAME,CUSTOMER_IMPLEMENTOR_EMAIL,"
+            + " SERVER_AVAILABILITY,SERVER_RESPONSIBILITY,SERVER_STARTDATE,SERVER_ENDDATE,SIGNOFF,SIGNOFF_ENDDATE) VALUES"
+            + " (81,'PO-910','Riverside%20VPN%20pilot','18.11.2026','FORM3 Submitted','Enterprise VPN','Dev Singh','dev+scm%40fixture.invalid',"
+            + " 'Pilot%20servers%20ready','End Customer','16.11.2026','18.11.2026','Customer sign-off','29.11.2026'),"
+            + " (82,'PO-910','Wrong company form',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),"
+            + " (83,'PO-911','Wrong order reference',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL),"
+            + " (84,'PO-910','Unlinked duplicate form',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)");
+        sql.execute("INSERT INTO scm_mobile_purchase_order_form_c VALUES ('QA-A',901,81),('QA-B',901,82),('QA-A',901,83)");
+        sql.execute("INSERT INTO DaywiseTask (SR_NO,STATUS,CUSTOMERNAME,PRODUCTSUIT,PRODUCTTOOL,MODULE_NAME,FUNCTION_NAME,WEIGHTAGE,DEVELOPER_NAME,DESCRIPTION,Assign_date) VALUES"
+            + " (181,'Completed','Riverside Works','Service Operations','VPN Access','Pilot tunnel checks','Development','25','Dev Singh','Tested pilot connectivity.','17.11.2026'),"
+            + " (182,'Pending','Riverside Works','Service Operations','VPN Access','Confirm device groups','Development','49','Noor Paul',NULL,'18.11.2026'),"
+            + " (183,'Completed','Riverside Works','Service Operations','VPN Access','Ungranted task','Development','10','Noor Paul',NULL,NULL),"
+            + " (184,'Completed','Riverside Works','Service Operations','VPN Access','Wrong company task','Development','12','Noor Paul',NULL,NULL),"
+            + " (185,'Completed','Unordered Lab','Service Operations','VPN Access','No accessible PO','Development','5','Noor Paul',NULL,NULL),"
+            + " (186,'Completed','Over Limit','Service Operations','VPN Access','Above legacy threshold','Development','101','Noor Paul',NULL,NULL),"
+            + " (187,'Completed','Riverside Works','Service Operations','VPN Access','Validate policy plan','Development planning','10.25','Dev Singh',NULL,'15.11.2026')");
+        sql.execute("INSERT INTO scm_mobile_task_access VALUES (13,'QA-A',181),(13,'QA-A',182),(13,'QA-B',184),"
+            + " (13,'QA-A',185),(13,'QA-A',186),(13,'QA-A',187)");
+    }
 
     private static void seed(Connection db, int id, String username, String displayName, String role, String directory, String email, String phone,
                              String company, String code, String method, String hash, String totp, boolean enabled) throws Exception {

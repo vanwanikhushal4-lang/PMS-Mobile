@@ -2,6 +2,7 @@ import { decodeAuthStep, type AuthStep } from './auth-contract.ts';
 import { decodeWorkspace } from './workspace-contract.ts';
 import { decodeCreatedProject, decodeProfile, decodeProject, decodeProjectCreateOptions, decodeProjectRecords, decodeProjects,
   type ProjectDraft } from './projects-contract.ts';
+import { decodePublishTree, decodePurchaseOrder, decodePurchaseOrders, type PublishCustomer, type PublishPath } from './publishing-contract.ts';
 import { decodeAssignedTasks, decodeTaskAssignees, decodeTaskContexts, decodeTaskDates, decodeWorkLog,
   type DateApproval, type DateProposal, type DateQueue, type StandaloneTask, type TaskContext, type TaskDraft, type TaskTransfer } from './tasks-contract.ts';
 
@@ -101,7 +102,8 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       : ['tasks/work-log', 'tasks/progress', 'tasks/complete', 'tasks/dates/detail', 'tasks/dates/request', 'tasks/dates/approve',
         'tasks/dates/request-batch', 'tasks/dates/approve-batch',
         'tasks/assignments/options', 'tasks/assignments/reassign', 'tasks/assignments/reassign-bulk'].includes(path) ? 'task-not-found'
-        : path.startsWith('tasks/assignments/standalone-') ? 'context-not-found' : null;
+        : path.startsWith('tasks/assignments/standalone-') ? 'context-not-found'
+          : path.startsWith('projects/publishing/') ? 'publishing-not-found' : null;
     const abort = new AbortController();
     const cancel = () => abort.abort();
     signal?.addEventListener('abort', cancel, { once: true });
@@ -298,6 +300,28 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
     reassignTasks: async (grant: Grant, items: readonly TaskTransfer[], signal?: AbortSignal) => {
       const data = await request('tasks/assignments/reassign-bulk', { items }, signal, grant.sessionToken);
       confirmedBatch(data, 'tasks-reassigned', items);
+    },
+    publishTree: async (grant: Grant, path: PublishPath, query?: string, after?: string, signal?: AbortSignal) => {
+      const data = decodePublishTree(await request('projects/publishing/tree', { ...path, query, after }, signal, grant.sessionToken),
+        path.tool !== undefined);
+      if (!data) throw new AuthError('bad-response');
+      return data;
+    },
+    publishOrders: async (grant: Grant, path: PublishCustomer, before?: number, signal?: AbortSignal) => {
+      const data = decodePurchaseOrders(await request('projects/publishing/orders', { ...path, before }, signal, grant.sessionToken));
+      if (!data || (before !== undefined && data.items.some((item) => item.id >= before))) throw new AuthError('bad-response');
+      return data;
+    },
+    publishOrder: async (grant: Grant, id: number, signal?: AbortSignal) => {
+      const data = decodePurchaseOrder(await request('projects/publishing/order', { id }, signal, grant.sessionToken));
+      if (!data || data.item.id !== id) throw new AuthError('bad-response');
+      return data;
+    },
+    publishOrderTasks: async (grant: Grant, id: number, before?: number, signal?: AbortSignal) => {
+      const body = jsonObject(await request('projects/publishing/tasks', { id, before }, signal, grant.sessionToken));
+      const data = decodeAssignedTasks(body);
+      if (body.orderId !== id || !data || (before !== undefined && data.items.some((item) => item.id >= before))) throw new AuthError('bad-response');
+      return data;
     },
     signOut: async (grant: Grant, signal?: AbortSignal) => { await request('sign-out', {}, signal, grant.sessionToken); },
     projectCreateOptions: async (grant: Grant, filters: { query?: string; functionQuery?: string }, signal?: AbortSignal) => {

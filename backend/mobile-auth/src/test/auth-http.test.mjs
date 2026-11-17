@@ -123,7 +123,7 @@ await test('profile, projects, tasks and work logs enforce the verified account 
   const a = await client.signIn(credentials('alex'));
   const b = await client.signIn(credentials('alex', 'QA-B', 'Second-company-fixture-only'));
   const noAccess = await client.signIn(credentials('directory', 'QA-A', 'Synthetic-AD-only-22'));
-  assert.deepEqual(a.session.identity.capabilities, ['projects.read', 'tasks.assigned-by-me', 'tasks.assigned-to-me']);
+  assert.deepEqual(a.session.identity.capabilities, ['projects.read', 'projects.publish', 'tasks.assigned-by-me', 'tasks.assigned-to-me']);
   assert.deepEqual(noAccess.session.identity.capabilities, []);
   assert.deepEqual(await client.profile(a.grant), {
     email: 'alex@fixture.invalid', phone: '+12025550101', location: 'Pune', site: 'West office',
@@ -509,7 +509,7 @@ await test('an authorized creator can save a first project and use the new works
   await assert.rejects(() => client.projectCreateOptions(viewer.grant, {}), { code: 'forbidden' });
   const options = await client.projectCreateOptions(creator.grant, {});
   assert.deepEqual(options.contexts.map(({ customer }) => customer), ['Harbor Clinic', 'Riverside Works']);
-  assert.deepEqual(options.functions, ['Access rollout', 'Development', 'Implementation']);
+  assert.deepEqual(options.functions, ['Access rollout', 'Development', 'Development planning', 'Implementation']);
   assert.deepEqual(options.responsibilities, ['Velox Solution', 'End Customer']);
   const scoped = await client.projectCreateOptions(creator.grant, { query: 'device security', functionQuery: 'implement' });
   assert.deepEqual(scoped.contexts, [options.contexts[0]]);
@@ -557,6 +557,57 @@ await test('an authorized creator can save a first project and use the new works
   assert.deepEqual((await client.projects(creator.grant, { query: rollback.name })).items, []);
   const recovered = await client.createProject(creator.grant, { ...rollback, requestKey: 'qa-project-receipt-retry-0001' });
   assert.equal(recovered.id, created.id + 1);
+});
+
+await test('Publish Project browses scoped progress and opens the exact purchase order, Form C and tasks', async () => {
+  const client = createAuthClient(resolveAuthConfig(datesBase, true));
+  const publisher = await client.signIn(credentials('publish-reviewer'));
+  const other = await client.signIn(credentials('alex', 'QA-B', 'Second-company-fixture-only'));
+  assert.equal(publisher.kind, 'authenticated');
+  assert.equal(other.kind, 'authenticated');
+  assert.ok(publisher.session.identity.capabilities.includes('projects.publish'));
+  assert.deepEqual((await client.publishTree(publisher.grant, {})).items.map(({ label }) => label), ['Development', 'Development planning']);
+  const phase = { phase: 'Development' };
+  const suite = { ...phase, suite: 'Service Operations' };
+  const tool = { ...suite, tool: 'VPN Access' };
+  assert.deepEqual((await client.publishTree(publisher.grant, phase)).items, [{ label: suite.suite, completedWeight: null }]);
+  assert.deepEqual((await client.publishTree(publisher.grant, suite)).items, [{ label: tool.tool, completedWeight: null }]);
+  assert.deepEqual((await client.publishTree(publisher.grant, tool)).items, [
+    { label: 'Riverside Works', completedWeight: '35.25' }, { label: 'Unordered Lab', completedWeight: '5' },
+  ]);
+  assert.deepEqual((await client.publishTree(publisher.grant, tool, 'river')).items, [{ label: 'Riverside Works', completedWeight: '35.25' }]);
+  assert.deepEqual((await client.publishTree(publisher.grant, tool, '%')).items, []);
+  assert.deepEqual((await client.publishTree(publisher.grant, { ...tool, phase: 'Development planning' })).items,
+    [{ label: 'Riverside Works', completedWeight: '10.25' }]);
+  assert.deepEqual((await client.publishTree(other.grant, tool)).items, []);
+
+  const customer = { ...tool, customer: 'Riverside Works' };
+  const orders = await client.publishOrders(publisher.grant, customer);
+  assert.deepEqual(orders.items.map(({ id, reference }) => [id, reference]), [[904, 'PO-913'], [901, 'PO-910']]);
+  assert.deepEqual((await client.publishOrders(publisher.grant, customer, 904)).items.map(({ id }) => id), [901]);
+  assert.deepEqual((await client.publishOrders(publisher.grant, { ...tool, customer: 'Unordered Lab' })).items, []);
+  await assert.rejects(() => client.publishOrders(publisher.grant, { ...tool, customer: 'Over Limit' }), { code: 'not-found' });
+  await assert.rejects(() => client.publishOrders(publisher.grant, { ...customer, tool: 'Device Security' }), { code: 'not-found' });
+  for (const id of [902, 905, 906]) await assert.rejects(() => client.publishOrder(publisher.grant, id), { code: 'not-found' });
+  await assert.rejects(() => client.publishOrder(other.grant, 901), { code: 'not-found' });
+  await assert.rejects(() => client.publishOrderTasks(other.grant, 901), { code: 'not-found' });
+
+  const detail = await client.publishOrder(publisher.grant, 901);
+  assert.equal(detail.item.projectId, 44);
+  assert.equal(detail.item.formStatus, 'FORM3 Submitted');
+  assert.equal(detail.item.paymentTerms, 'Net 30');
+  assert.equal(detail.formC.project, 'Riverside VPN pilot');
+  assert.equal(detail.formC.implementorEmail, 'dev+scm@fixture.invalid');
+  assert.deepEqual(detail.formC.milestones, [
+    { name: 'Server availability', description: 'Pilot servers ready', responsibility: 'End Customer', start: '16.11.2026', due: '18.11.2026' },
+    { name: 'Sign-off', description: 'Customer sign-off', responsibility: '', start: '', due: '29.11.2026' },
+  ]);
+  const manual = await client.publishOrder(publisher.grant, 904);
+  assert.equal(manual.formC, null);
+  assert.equal(manual.item.projectId, null);
+  assert.deepEqual((await client.publishOrderTasks(publisher.grant, 901)).items.map(({ id, assignedAt }) => [id, assignedAt]),
+    [[187, '15.11.2026'], [182, '18.11.2026'], [181, '17.11.2026']]);
+  assert.deepEqual((await client.publishOrderTasks(publisher.grant, 904)).items, []);
 });
 
 await test('authenticator enrollment generates a usable secret and prevents reusing a time slot', async () => {

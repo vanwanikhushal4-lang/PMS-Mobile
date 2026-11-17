@@ -19,6 +19,7 @@ public final class Accounts {
         + " c.COMPANY_CODE, c.COMPANY_NAME, m.PASSWORD_HASH, m.MFA_MODE, m.TOTP_ENCRYPTED, m.REVISION,"
         + " EXISTS(SELECT 1 FROM scm_mobile_project_access a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS PROJECT_ACCESS,"
         + " EXISTS(SELECT 1 FROM scm_mobile_project_create_context a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS PROJECT_CREATE,"
+        + " EXISTS(SELECT 1 FROM scm_mobile_purchase_order_access a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS PURCHASE_ORDER_ACCESS,"
         + " EXISTS(SELECT 1 FROM scm_mobile_task_access a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS TASK_ACCESS"
         + " FROM scm_mobile_account m JOIN LOGINMASTER l ON l.LOGINID=m.LOGIN_ID"
         + " JOIN company_code_master c ON c.COMPANY_CODE=m.COMPANY_CODE AND c.COMPANY_NAME=l.COMPANY"
@@ -86,6 +87,17 @@ public final class Accounts {
             } catch (SQLException failure) {
                 // The legacy writer allocates its ID without the mobile lock.
                 if (!allocationCollision(failure) || attempt >= 2) throw failure;
+            }
+        }
+    }
+
+    JSONObject publishing(Account account, JSONObject input, String action) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            switch (action) {
+                case "projects/publishing/tree": return PublishedProjects.tree(db, account, input);
+                case "projects/publishing/orders": return PublishedProjects.orders(db, account, input);
+                case "projects/publishing/order": return PublishedProjects.detail(db, account, input.getInt("id"));
+                default: return AssignedTasks.orderPage(db, account, input.getInt("id"), input.optInt("before"));
             }
         }
     }
@@ -229,12 +241,14 @@ public final class Accounts {
         final long revision;
         final boolean projectAccess;
         final boolean projectCreate;
+        final boolean purchaseOrderAccess;
         final boolean taskAccess;
         final String username, fullname, role, designation, companyCode, companyName, email, phone, kind, mode, passwordHash, totp;
         Account(ResultSet data) throws SQLException {
             id = data.getInt("LOGINID"); revision = data.getLong("REVISION");
             projectAccess = data.getBoolean("PROJECT_ACCESS");
             projectCreate = data.getBoolean("PROJECT_CREATE");
+            purchaseOrderAccess = data.getBoolean("PURCHASE_ORDER_ACCESS");
             taskAccess = data.getBoolean("TASK_ACCESS");
             username = clean(data, "USERNAME"); fullname = clean(data, "FULL_NAME"); role = clean(data, "ROLE_TYPE");
             designation = clean(data, "DESIGNATION"); companyCode = clean(data, "COMPANY_CODE"); companyName = clean(data, "COMPANY_NAME");
@@ -247,14 +261,16 @@ public final class Accounts {
                 && ("off".equals(mode) || "sms".equals(mode) || "totp".equals(mode));
         }
         boolean directory() { return "AD".equalsIgnoreCase(kind); }
-        boolean projectWorkspace() { return projectAccess || projectCreate; }
+        boolean projectWorkspace() { return projectAccess || projectCreate || purchaseOrderAccess; }
+        boolean publishingAccess() { return purchaseOrderAccess || ((projectAccess || projectCreate) && taskAccess); }
         boolean taskWorkspace() { return taskAccess || TaskRoster.canCreate(this); }
         JSONObject identity() {
             JSONArray capabilities = new JSONArray();
             if (projectWorkspace()) capabilities.put("projects.read");
             if (projectCreate) capabilities.put("projects.create");
+            if (publishingAccess()) capabilities.put("projects.publish");
             if (taskWorkspace()) capabilities.put("tasks.assigned-by-me").put("tasks.assigned-to-me");
-            if (projectWorkspace() && TaskRoster.canCreate(this)) capabilities.put("tasks.create");
+            if ((projectAccess || projectCreate) && TaskRoster.canCreate(this)) capabilities.put("tasks.create");
             if (TaskRoster.canCreate(this)) capabilities.put("tasks.create-standalone");
             return new JSONObject().put("username", username).put("displayName", fullname).put("role", role).put("designation", designation)
                 .put("companyCode", companyCode).put("companyName", companyName).put("capabilities", capabilities);

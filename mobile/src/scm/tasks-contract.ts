@@ -3,7 +3,7 @@ export type AssignedTask = {
   description: string; lead: string; developer: string; assigner: string; start: string; due: string;
   workLog: boolean; dateAccess: boolean; dateApproval: string; reassignable: boolean;
   reference: string; priority: string; weight: string; function: string; responsibility: string;
-  dateReview: DateReview | null;
+  dateReview: DateReview | null; assignedAt: string;
 };
 export type AssignedTaskPage = { items: AssignedTask[]; next: number | null };
 export type WorkLog = {
@@ -56,17 +56,17 @@ export function decodeAssignedTasks(value: unknown): AssignedTaskPage | null {
     if (!row) return null;
     const { id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due,
       workLog = false, dateAccess = false, dateApproval = '', reassignable = false, reference = '', priority = '', weight = '',
-      function: functionName = '', responsibility = '' } = row;
+      function: functionName = '', responsibility = '', assignedAt = '' } = row;
     const previous = items.at(-1);
     if (!id(number) || (previous && number >= previous.id) || !label(module) || !label(status) || !label(customer)
       || !label(suite) || !label(tool) || typeof description !== 'string' || description.length > 16_384
       || !label(lead) || !label(developer) || !label(assigner) || !label(start) || !label(due) || typeof workLog !== 'boolean'
       || typeof dateAccess !== 'boolean' || !label(dateApproval) || typeof reassignable !== 'boolean'
-      || !label(reference) || !label(priority) || !label(weight) || !label(functionName) || !label(responsibility)) return null;
+      || !label(reference) || !label(priority) || !label(weight) || !label(functionName) || !label(responsibility) || !label(assignedAt)) return null;
     const dateReview = decodeDateReview(row.dateReview);
     if (row.dateReview !== undefined && row.dateReview !== null && (!dateReview || !dateAccess)) return null;
     items.push({ id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due,
-      workLog, dateAccess, dateApproval, reassignable, reference, priority, weight, function: functionName, responsibility, dateReview });
+      workLog, dateAccess, dateApproval, reassignable, reference, priority, weight, function: functionName, responsibility, dateReview, assignedAt });
   }
   const next = body.next;
   if (next !== null && (!id(next) || items.length !== 30 || items.at(-1)?.id !== next)) return null;

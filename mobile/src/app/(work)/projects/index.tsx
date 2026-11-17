@@ -16,6 +16,7 @@ const folders = ['All projects', 'Saved'] as const;
 export default function ProjectsScreen() {
   const { state } = useSession();
   const canCreate = state.kind === 'active' && state.session.identity.capabilities.includes('projects.create');
+  const canBrowsePublishing = state.kind === 'active' && state.session.identity.capabilities.includes('projects.publish');
   const [input, setInput] = useState('');
   const [term, setTerm] = useState('');
   const [saved, setSaved] = useState(false);
@@ -38,6 +39,7 @@ export default function ProjectsScreen() {
     <WorkspaceHeading title="Projects" context={state.kind === 'active' ? state.session.identity.companyName : undefined} />
     <View style={styles.content}>
       {canCreate ? <Action label="Create project" secondary testID="open-project-create" onPress={() => router.push('/projects/create')} /> : null}
+      {canBrowsePublishing ? <TextAction label="Publish Project" testID="open-publishing" onPress={() => router.push('/projects/publishing')} /> : null}
       <WorkspaceTabs labels={folders} index={saved ? 1 : 0} onSelect={(index) => {
         if (saved === (index === 1)) return;
         setSaved(index === 1);
