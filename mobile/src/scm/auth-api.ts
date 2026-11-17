@@ -1,4 +1,5 @@
 import { decodeAuthStep, type AuthStep } from './auth-contract.ts';
+import { decodeAttachments, type AttachmentTarget } from './attachments-contract.ts';
 import { decodeWorkspace } from './workspace-contract.ts';
 import { decodeCreatedProject, decodeProfile, decodeProject, decodeProjectCreateOptions, decodeProjectRecords, decodeProjects,
   type ProjectDraft } from './projects-contract.ts';
@@ -103,6 +104,7 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
         'tasks/dates/request-batch', 'tasks/dates/approve-batch',
         'tasks/assignments/options', 'tasks/assignments/reassign', 'tasks/assignments/reassign-bulk'].includes(path) ? 'task-not-found'
         : path.startsWith('tasks/assignments/standalone-') ? 'context-not-found'
+          : path === 'projects/attachments/list' ? 'attachment-not-found'
           : path.startsWith('projects/publishing/') ? 'publishing-not-found' : null;
     const abort = new AbortController();
     const cancel = () => abort.abort();
@@ -322,6 +324,11 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       const data = decodeAssignedTasks(body);
       if (body.orderId !== id || !data || (before !== undefined && data.items.some((item) => item.id >= before))) throw new AuthError('bad-response');
       return data;
+    },
+    projectAttachments: async (grant: Grant, target: AttachmentTarget, signal?: AbortSignal) => {
+      const attachments = decodeAttachments(await request('projects/attachments/list', target, signal, grant.sessionToken), target);
+      if (!attachments) throw new AuthError('bad-response');
+      return attachments;
     },
     signOut: async (grant: Grant, signal?: AbortSignal) => { await request('sign-out', {}, signal, grant.sessionToken); },
     projectCreateOptions: async (grant: Grant, filters: { query?: string; functionQuery?: string }, signal?: AbortSignal) => {

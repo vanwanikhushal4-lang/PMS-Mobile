@@ -1,6 +1,8 @@
 package com.velox.itsm.mobileauth;
 
 import com.velox.itsm.mobileauth.Accounts.Account;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.sql.SQLException;
 import java.time.LocalDate;
@@ -29,6 +31,7 @@ public final class AuthService implements AutoCloseable {
     private final Delivery delivery;
     private final LongSupplier clock;
     private final String dummyHash;
+    private final Path attachmentRoot;
     private final Expiring<Session> sessions = new Expiring<>(10000, item -> item.until);
     private final Expiring<Pending> pending = new Expiring<>(5000, item -> item.until);
     private final Expiring<Reset> resets = new Expiring<>(2000, item -> item.until);
@@ -37,8 +40,9 @@ public final class AuthService implements AutoCloseable {
         Thread thread = new Thread(task, "scm-mobile-recovery"); thread.setDaemon(true); return thread;
     });
 
-    public AuthService(Accounts accounts, Secrets secrets, Directory directory, Delivery delivery, LongSupplier clock) {
+    public AuthService(Accounts accounts, Secrets secrets, Directory directory, Delivery delivery, LongSupplier clock, Path attachmentRoot) {
         this.accounts = accounts; this.secrets = secrets; this.directory = directory; this.delivery = delivery; this.clock = clock;
+        this.attachmentRoot = attachmentRoot;
         dummyHash = secrets.passwordHash(secrets.token());
     }
 
@@ -54,6 +58,7 @@ public final class AuthService implements AutoCloseable {
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
             case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
+            case "projects/attachments/list": case "projects/attachments/download":
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
@@ -235,6 +240,7 @@ public final class AuthService implements AutoCloseable {
             case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
             case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
+            case "projects/attachments/list": case "projects/attachments/download":
                 result = projects(action, input, key, account, now);
                 break;
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
@@ -248,11 +254,22 @@ public final class AuthService implements AutoCloseable {
                 break;
             default: result = reply(200, authenticated(account, item.until));
         }
-        if (sessions.get(key, clock.getAsLong()) != item) return rejected(401, "expired");
+        if (sessions.get(key, clock.getAsLong()) != item) {
+            if (result.download != null) {
+                try { result.download.close(); }
+                catch (IOException failure) { LOG.warning("SCM cancelled attachment could not be closed"); }
+            }
+            return rejected(401, "expired");
+        }
         return result;
     }
 
     private Reply projects(String action, JSONObject input, String key, Account account, long now) throws SQLException {
+        if (action.startsWith("projects/attachments/")) {
+            if (!account.projectWorkspace()) return rejected(403, "forbidden");
+            if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
+            return projectAttachments(input, account, "projects/attachments/download".equals(action));
+        }
         if (action.startsWith("projects/publishing/")) {
             if (!account.publishingAccess()) return rejected(403, "forbidden");
             if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
@@ -273,6 +290,24 @@ public final class AuthService implements AutoCloseable {
         if (!(options ? ProjectCreation.validOptions(input) : Projects.valid(input, action))) return rejected(400, "invalid-filter");
         JSONObject projects = accounts.projects(account, input, action);
         return projects == null ? rejected(404, "project-not-found") : reply(200, projects);
+    }
+
+    private Reply projectAttachments(JSONObject input, Account account, boolean download) throws SQLException {
+        ProjectAttachments.Target target = ProjectAttachments.Target.parse(input, download);
+        if (target == null) return rejected(400, "invalid-filter");
+        Map<String, String> files = accounts.projectAttachments(account, target);
+        if (files == null) return rejected(404, "attachment-not-found");
+        if (!download) return reply(200, ProjectAttachments.list(target, files));
+        String filename = files.get(target.kind);
+        if (filename == null) return rejected(404, "attachment-not-found");
+        if (attachmentRoot == null) return rejected(503, "attachments-unavailable");
+        try {
+            ProjectAttachments.Download content = ProjectAttachments.open(attachmentRoot, filename);
+            return content == null ? rejected(404, "attachment-not-found") : new Reply(200, null, content);
+        } catch (IOException failure) {
+            LOG.warning("SCM attachment storage unavailable: " + failure.getClass().getSimpleName());
+            return rejected(503, "attachments-unavailable");
+        }
     }
 
     private Reply tasks(String action, JSONObject input, String key, Account account, long now) throws SQLException {
@@ -501,7 +536,11 @@ public final class AuthService implements AutoCloseable {
     public static final class Reply {
         public final int status;
         public final JSONObject body;
-        Reply(int status, JSONObject body) { this.status = status; this.body = body; }
+        final ProjectAttachments.Download download;
+        Reply(int status, JSONObject body) { this(status, body, null); }
+        Reply(int status, JSONObject body, ProjectAttachments.Download download) {
+            this.status = status; this.body = body; this.download = download;
+        }
     }
     private static class Reference {
         final int id; final String company; final long revision;

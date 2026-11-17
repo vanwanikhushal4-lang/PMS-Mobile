@@ -4,8 +4,9 @@ import { AuthError } from '../scm/auth-api';
 import { authClient } from '../scm/auth-config';
 import type { Project, ProjectRecordGroup, ProjectRecords } from '../scm/projects-contract';
 import { useSession } from '../scm/session';
-import { FormMessage } from './Access';
+import { FormMessage, TextAction } from './Access';
 import { Icon, type } from './Primitives';
+import { ProjectAttachmentPanel } from './ProjectAttachmentPanel';
 import { useReducedMotion } from './motion';
 import { color } from './theme';
 
@@ -106,20 +107,29 @@ export function ProjectFavorite({ id, saved }: { id: number; saved: boolean }) {
 }
 
 export function ProjectRecordList({ records }: { records: ProjectRecords }) {
-  const groups: [string, ProjectRecordGroup][] = [
-    ['Requirement documents', records.requirements], ['Understanding documents', records.understanding], ['Kickoff meetings', records.kickoff],
+  const [open, setOpen] = useState('');
+  const groups: [string, ProjectRecordGroup, 'requirement' | 'understanding' | null][] = [
+    ['Requirement documents', records.requirements, 'requirement'], ['Understanding documents', records.understanding, 'understanding'],
+    ['Kickoff meetings', records.kickoff, null],
   ];
   const available = groups.filter(([, group]) => group.items.length > 0);
   if (!available.length) return <Text style={type.body}>This project has no linked records.</Text>;
   return <View style={styles.groups}>
-    {available.map(([label, group]) => <View key={label} style={styles.group}>
+    {available.map(([label, group, scope]) => <View key={label} style={styles.group}>
       <Text accessibilityRole="header" style={styles.title}>{label}</Text>
       <View style={styles.register}>
-        {group.items.map((item, index) => <View key={item.id} style={[styles.record, index > 0 && styles.divided]}>
-          {item.reference || item.format ? <Text style={styles.title}>{item.reference || item.format}</Text> : null}
-          {item.status ? <Text style={type.eyebrow}>{item.status}</Text> : null}
-          <Text style={type.caption}>{item.date || 'Date unavailable'}</Text>
-        </View>)}
+        {group.items.map((item, index) => {
+          const key = scope + '-' + item.id;
+          const action = open === key ? 'Hide files' : 'Files';
+          return <View key={item.id} style={[styles.record, index > 0 && styles.divided]}>
+            {item.reference || item.format ? <Text style={styles.title}>{item.reference || item.format}</Text> : null}
+            {item.status ? <Text style={type.eyebrow}>{item.status}</Text> : null}
+            <Text style={type.caption}>{item.date || 'Date unavailable'}</Text>
+            {scope ? <TextAction label={action} accessibilityLabel={action + ' for ' + (item.reference || scope)}
+              onPress={() => setOpen(open === key ? '' : key)} /> : null}
+            {scope && open === key ? <ProjectAttachmentPanel target={{ scope, id: records.projectId, recordId: item.id }} /> : null}
+          </View>;
+        })}
       </View>
       {group.hasMore ? <Text style={type.caption}>Showing the 20 most recent records.</Text> : null}
     </View>)}

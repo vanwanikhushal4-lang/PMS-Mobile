@@ -34,6 +34,7 @@ public class AuthController {
         "/projects/list", "/projects/detail", "/projects/records", "/projects/tasks", "/projects/favorite",
         "/projects/create-options", "/projects/create",
         "/projects/publishing/tree", "/projects/publishing/orders", "/projects/publishing/order", "/projects/publishing/tasks",
+        "/projects/attachments/list", "/projects/attachments/download",
         "/tasks/assigned-by-me", "/tasks/assigned-to-me", "/tasks/completed", "/tasks/work-log", "/tasks/progress", "/tasks/complete",
         "/tasks/dates/list", "/tasks/dates/detail", "/tasks/dates/request", "/tasks/dates/approve",
         "/tasks/dates/request-batch", "/tasks/dates/approve-batch",
@@ -68,7 +69,16 @@ public class AuthController {
             int limit = "tasks/dates/request-batch".equals(action) ? MAX_BODY * 5 : MAX_BODY;
             JSONObject data = withBody ? read(request, limit) : new JSONObject();
             AuthService.Reply reply = auth.dispatch(action, data, bearer, request.getRemoteAddr());
-            write(response, reply.status, reply.body);
+            if (reply.download == null) write(response, reply.status, reply.body);
+            else try (ProjectAttachments.Download file = reply.download) {
+                response.setStatus(reply.status);
+                response.setContentType(file.mimeType());
+                response.setHeader("Cache-Control", "no-store, no-transform");
+                response.setHeader("Content-Disposition", file.disposition());
+                response.setHeader("Content-Security-Policy", "sandbox");
+                response.setContentLengthLong(file.length);
+                file.writeTo(response.getOutputStream());
+            }
         } catch (BodyTooLarge e) { error(response, 413, "account-unavailable"); }
         catch (JSONException e) { error(response, 400, "account-unavailable"); }
         catch (SQLException | AuthService.Unavailable | IllegalStateException e) {

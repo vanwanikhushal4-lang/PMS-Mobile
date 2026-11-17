@@ -215,6 +215,23 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " ('Ari Shah','Dev Singh','Gia Gupta','Disabled Roster','Service Operations','Email'),"
                     + " ('Noor Paul','Noor Paul','Maya Sen','Other Roster','Service Operations','Endpoint')");
                 seedPublishing(sql);
+                sql.execute("ALTER TABLE PurchaseOrder ADD MassPOFile VARCHAR(255)");
+                sql.execute("ALTER TABLE PurchaseOrder ADD productFeaturedFileList VARCHAR(255)");
+                sql.execute("ALTER TABLE PurchaseOrder ADD pouploadfile VARCHAR(255)");
+                sql.execute("UPDATE PurchaseOrder SET MassPOFile='Riverside masked.pdf', productFeaturedFileList='Riverside – features.txt',"
+                    + " pouploadfile='Unmasked PO.pdf' WHERE SR_NO=901");
+                sql.execute("UPDATE PurchaseOrder SET MassPOFile='No File Available' WHERE SR_NO=904");
+                for (String column : new String[]{"rdUpload", "maskedPOfile", "ScopeWork_File", "RFP_File", "Other_File"}) {
+                    sql.execute("ALTER TABLE requirementDocument ADD " + column + " VARCHAR(255)");
+                }
+                for (String column : new String[]{"udFile", "Other_UDFile", "rdFile", "maskedPOFile", "ScopeWork_File", "RFP_File", "Other_File"}) {
+                    sql.execute("ALTER TABLE UnderstandingDocument ADD " + column + " VARCHAR(255)");
+                }
+                sql.execute("UPDATE requirementDocument SET rdUpload='Requirements61.pdf', maskedPOfile='Riverside masked.pdf',"
+                    + " ScopeWork_File='Scope61.txt', RFP_File='missing-rfp61.pdf', Other_File='Linked file.txt' WHERE SR_NO=61");
+                sql.execute("UPDATE requirementDocument SET rdUpload='Unmasked PO.pdf' WHERE SR_NO=62");
+                sql.execute("UPDATE UnderstandingDocument SET udFile='Understanding71.pdf', rdFile='Requirements61.pdf',"
+                    + " Other_File='unrelated/private.txt' WHERE SR_NO=71");
             }
             AuthService.Directory directory = (company, username, password) -> "QA-A".equals(company) && "directory".equals(username) && "Synthetic-AD-only-22".equals(password);
             AuthService.Delivery deliver = (channel, destination, code) -> {
@@ -231,7 +248,9 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 .setProperty("hibernate.temp.use_jdbc_metadata_defaults", "false");
             hibernate.getProperties().put(AvailableSettings.DATASOURCE, db);
             SessionFactory sessions = hibernate.buildSessionFactory();
-            return new AuthService(new Accounts(db, () -> sessions), secrets, directory, deliver, clock);
+            Path files = seedAttachmentFiles(inbox.toAbsolutePath().resolveSibling(inbox.getFileName() + "-attachments-"
+                + instance.replaceAll("[^A-Za-z0-9_-]", "_")));
+            return new AuthService(new Accounts(db, () -> sessions), secrets, directory, deliver, clock, files);
         }
 
         @Bean public AuthController stageController(AuthService auth) { return new LoopbackController(auth); }
@@ -243,6 +262,42 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
     @org.springframework.web.bind.annotation.RestController
     @org.springframework.web.bind.annotation.RequestMapping("/mobile/v1/auth")
     public static class LoopbackController extends AuthController { LoopbackController(AuthService auth) { super(auth, true); } }
+
+    private static Path seedAttachmentFiles(Path root) throws java.io.IOException {
+        Files.createDirectories(root);
+        Files.write(root.resolve("Riverside masked.pdf"), fixturePdf("Masked purchase order - Riverside pilot"));
+        Files.write(root.resolve("Requirements61.pdf"), fixturePdf("Requirements for Riverside"));
+        Files.write(root.resolve("Understanding71.pdf"), fixturePdf("Understanding for Riverside"));
+        Files.write(root.resolve("Unmasked PO.pdf"), fixturePdf("Unmasked fixture restricted to sales"));
+        Files.write(root.resolve("Riverside – features.txt"), "VPN pilot; device policy validation.\n".getBytes(StandardCharsets.UTF_8));
+        Files.write(root.resolve("Scope61.txt"), "Riverside pilot deployment scope.\n".getBytes(StandardCharsets.UTF_8));
+        Path outside = root.resolveSibling(root.getFileName() + "-outside.txt");
+        Files.write(outside, "Outside the attachment directory.".getBytes(StandardCharsets.UTF_8));
+        try { Files.createSymbolicLink(root.resolve("Linked file.txt"), outside); }
+        catch (UnsupportedOperationException | java.io.IOException ignored) { /* Symlink creation is optional on Windows fixtures. */ }
+        return root;
+    }
+
+    private static byte[] fixturePdf(String message) {
+        String content = "BT /F1 18 Tf 48 710 Td (" + message + ") Tj ET\n";
+        String[] objects = {
+            "<< /Type /Catalog /Pages 2 0 R >>",
+            "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 600 760] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+            "<< /Length " + content.length() + " >>\nstream\n" + content + "endstream",
+            "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"
+        };
+        StringBuilder file = new StringBuilder("%PDF-1.4\n");
+        StringBuilder offsets = new StringBuilder("0000000000 65535 f \n");
+        for (int i = 0; i < objects.length; i++) {
+            offsets.append(String.format(java.util.Locale.ROOT, "%010d 00000 n \n", file.length()));
+            file.append(i + 1).append(" 0 obj\n").append(objects[i]).append("\nendobj\n");
+        }
+        int crossReference = file.length();
+        file.append("xref\n0 6\n").append(offsets).append("trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n")
+            .append(crossReference).append("\n%%EOF\n");
+        return file.toString().getBytes(StandardCharsets.US_ASCII);
+    }
 
     private static void seedPublishing(Statement sql) throws java.sql.SQLException {
         sql.execute("CREATE TABLE PurchaseOrder (SR_NO INT PRIMARY KEY, vlx_id VARCHAR(120), customername VARCHAR(120),"

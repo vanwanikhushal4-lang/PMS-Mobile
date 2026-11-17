@@ -608,6 +608,49 @@ await test('Publish Project browses scoped progress and opens the exact purchase
   assert.deepEqual((await client.publishOrderTasks(publisher.grant, 901)).items.map(({ id, assignedAt }) => [id, assignedAt]),
     [[187, '15.11.2026'], [182, '18.11.2026'], [181, '17.11.2026']]);
   assert.deepEqual((await client.publishOrderTasks(publisher.grant, 904)).items, []);
+
+  const orderTarget = { scope: 'purchase-order', id: 901 };
+  assert.deepEqual(await client.projectAttachments(publisher.grant, orderTarget), [
+    { kind: 'masked-po', name: 'Riverside masked.pdf', mimeType: 'application/pdf' },
+    { kind: 'product-features', name: 'Riverside – features.txt', mimeType: 'text/plain' },
+  ]);
+  assert.deepEqual(await client.projectAttachments(publisher.grant, { ...orderTarget, id: 904 }), []);
+  await assert.rejects(() => client.projectAttachments(other.grant, orderTarget), { code: 'not-found' });
+  const download = (grant, target) => fetch(new URL('projects/attachments/download', datesBase), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(grant ? { Authorization: 'Bearer ' + grant.sessionToken } : {}) },
+    body: JSON.stringify(target),
+  });
+  const masked = { ...orderTarget, kind: 'masked-po' };
+  assert.equal((await download(null, masked)).status, 401);
+  assert.equal((await download(other.grant, masked)).status, 404);
+  assert.equal((await download(publisher.grant, { ...masked, kind: 'unmasked-po' })).status, 400);
+  assert.equal((await download(publisher.grant, { ...masked, filename: 'Unmasked PO.pdf' })).status, 400);
+  const pdf = await download(publisher.grant, masked);
+  assert.equal(pdf.status, 200);
+  assert.match(pdf.headers.get('content-type'), /^application\/pdf/);
+  assert.equal(pdf.headers.get('cache-control'), 'no-store, no-transform');
+  assert.match(pdf.headers.get('content-disposition'), /filename\*=UTF-8''Riverside%20masked\.pdf$/);
+  const bytes = Buffer.from(await pdf.arrayBuffer());
+  assert.equal(bytes.byteLength, Number(pdf.headers.get('content-length')));
+  assert.equal(bytes.subarray(0, 8).toString(), '%PDF-1.4');
+  assert.match(bytes.toString(), /Masked purchase order - Riverside pilot/);
+  const features = await download(publisher.grant, { ...orderTarget, kind: 'product-features' });
+  assert.equal(features.status, 200);
+  assert.match(features.headers.get('content-disposition'), /Riverside%20%E2%80%93%20features\.txt$/);
+  assert.equal(await features.text(), 'VPN pilot; device policy validation.\n');
+  const requirement = { scope: 'requirement', id: 44, recordId: 61 };
+  assert.deepEqual((await client.projectAttachments(publisher.grant, requirement)).map(({ kind }) => kind),
+    ['requirement-file', 'masked-po', 'scope-of-work', 'rfp', 'other']);
+  const scopeFile = await download(publisher.grant, { ...requirement, kind: 'scope-of-work' });
+  assert.equal(scopeFile.status, 200);
+  assert.equal(await scopeFile.text(), 'Riverside pilot deployment scope.\n');
+  for (const kind of ['rfp', 'other']) {
+    assert.equal((await download(publisher.grant, { ...requirement, kind })).status, 404);
+  }
+  assert.equal((await download(publisher.grant, { ...requirement, recordId: 62, kind: 'requirement-file' })).status, 404);
+  assert.equal((await download(publisher.grant, { ...requirement, id: 51, kind: 'requirement-file' })).status, 404);
+  assert.deepEqual((await client.projectAttachments(publisher.grant, { scope: 'understanding', id: 44, recordId: 71 }))
+    .map(({ kind }) => kind), ['understanding-file', 'requirement-file']);
 });
 
 await test('authenticator enrollment generates a usable secret and prevents reusing a time slot', async () => {

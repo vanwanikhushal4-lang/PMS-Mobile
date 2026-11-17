@@ -102,6 +102,12 @@ public final class Accounts {
         }
     }
 
+    Map<String, String> projectAttachments(Account account, ProjectAttachments.Target target) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return ProjectAttachments.filenames(db, account, target);
+        }
+    }
+
     JSONObject assignedTasks(Account account, int before, String action) throws SQLException {
         try (Connection db = source.getConnection()) {
             return AssignedTasks.read(db, account, before, action);

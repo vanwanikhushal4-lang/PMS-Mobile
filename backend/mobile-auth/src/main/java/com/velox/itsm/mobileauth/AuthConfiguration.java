@@ -1,6 +1,8 @@
 package com.velox.itsm.mobileauth;
 
 import java.net.URI;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Properties;
@@ -25,8 +27,16 @@ public class AuthConfiguration {
             return new AuthService(new Accounts(mobileDataSource(env), () -> context.getBean(SessionFactory.class)), secrets,
                 Integrations.directory(env.getProperty("SCM_MOBILE_AUTH_AD_URL"), env.getProperty("SCM_MOBILE_AUTH_AD_COMPANY"), env.getProperty("SCM_MOBILE_AUTH_AD_REALM")),
                 Integrations.delivery(env.getProperty("SCM_MOBILE_AUTH_DELIVERY_URL"), env.getProperty("SCM_MOBILE_AUTH_DELIVERY_BEARER")),
-                System::currentTimeMillis);
+                System::currentTimeMillis, attachmentRoot(env));
         } finally { Arrays.fill(key, (byte)0); }
+    }
+
+    private Path attachmentRoot(Environment env) {
+        String configured = env.getProperty("SCM_MOBILE_ATTACHMENT_ROOT", "").trim();
+        if (configured.isEmpty()) return null;
+        Path root = Paths.get(configured);
+        if (!root.isAbsolute()) throw new IllegalArgumentException("SCM mobile attachment root must be absolute");
+        return root;
     }
 
     private DriverManagerDataSource mobileDataSource(Environment env) {

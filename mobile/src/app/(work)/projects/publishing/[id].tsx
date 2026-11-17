@@ -8,10 +8,11 @@ import type { FormC } from '../../../../scm/publishing-contract';
 import { FormMessage, Phase, TextAction } from '../../../../ui/Access';
 import { BrandedTopBar } from '../../../../ui/Brand';
 import { Action, DetailRecord, Screen, type } from '../../../../ui/Primitives';
+import { ProjectAttachmentPanel } from '../../../../ui/ProjectAttachmentPanel';
 import { WorkspaceTabs } from '../../../../ui/Workspace';
 import { color } from '../../../../ui/theme';
 
-const tabs = ['Order', 'Form C', 'Tasks'];
+const tabs = ['Order', 'Form C', 'Tasks', 'Files'];
 
 export default function PurchaseOrderScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -52,6 +53,7 @@ export default function PurchaseOrderScreen() {
           </> : null}
           {pane.index === 1 ? detail.formC ? <Implementation form={detail.formC} /> : <Text style={type.body}>No Form C is linked to this order.</Text> : null}
           {pane.index === 2 ? <OrderTasks orderId={orderId} /> : null}
+          {pane.index === 3 ? <ProjectAttachmentPanel target={{ scope: 'purchase-order', id: orderId }} /> : null}
         </Phase>
       </Phase> : null}
     </View>
