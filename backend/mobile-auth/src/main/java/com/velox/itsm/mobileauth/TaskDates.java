@@ -6,6 +6,8 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Collections;
+import java.util.Map;
 import org.hibernate.Session;
 import org.hibernate.SessionFactory;
 import org.hibernate.Transaction;
@@ -20,15 +22,31 @@ final class TaskDates {
     static final String WAITING = "t.updateDate_Status='" + AWAITING + "'";
     private static final String PARTICIPANT = " AND ? IN (t.DEVELOPER_NAME,t.TEAM_LEADER,t.MANAGER_NAME)";
     private static final String SCOPED_TASK = AssignedTasks.SCOPED + PARTICIPANT + " AND t.SR_NO=?";
+    static final String PROPOSAL_FIELDS = ",t.updateStarts_Date,t.updateEnd_Date,t.updateDates_Reason,t.updateTimeDate,t.updateDateCount,t.dateUpdateBy";
     private static final String SELECT = "SELECT t.STATUS,t.DEVELOPER_NAME,t.TEAM_LEADER,t.MANAGER_NAME,t.START_DATE,t.END_DATE,"
-        + "t.updateDate_Status,t.updateStarts_Date,t.updateEnd_Date,t.updateDates_Reason,t.updateTimeDate,t.updateDateCount,t.dateUpdateBy"
-        + SCOPED_TASK;
+        + "t.updateDate_Status" + PROPOSAL_FIELDS + SCOPED_TASK;
     private static final String HISTORY_ENTITY = "com.velox.itsm.model.ReviseDateHistory";
     private static final int HISTORY_LIMIT = 20;
 
     private TaskDates() {}
 
-    enum Result { SAVED, MISSING, CHANGED, INVALID_RANGE, NO_REVIEWER }
+    enum Result { SAVED, MISSING, CHANGED, INVALID_RANGE, NO_REVIEWER, REASON_LENGTH, INVALID_INPUT }
+
+    static final class Proposal {
+        final LocalDate start, due;
+        final String reason, revision;
+
+        Proposal(LocalDate start, LocalDate due, String reason, String revision) {
+            this.start = start; this.due = due; this.reason = reason; this.revision = revision;
+        }
+    }
+
+    static final class Rejection {
+        final Result result;
+        final int id;
+
+        Rejection(Result result, int id) { this.result = result; this.id = id; }
+    }
 
     static boolean managerRoute(Accounts.Account account) {
         return "Implementor".equalsIgnoreCase(account.role)
@@ -45,6 +63,7 @@ final class TaskDates {
             .put("requestedStart", schedule.awaiting() ? schedule.requestedStart : "")
             .put("requestedDue", schedule.awaiting() ? schedule.requestedDue : "")
             .put("reason", schedule.awaiting() ? HtmlUtils.htmlUnescape(schedule.reason) : "")
+            .put("scheduleRevision", schedule.revision(id))
             .put("revision", schedule.awaiting() ? schedule.revision(id) : JSONObject.NULL);
         JSONArray history = new JSONArray();
         try (PreparedStatement query = db.prepareStatement(
@@ -67,6 +86,14 @@ final class TaskDates {
                 return data.put("history", history).put("hasMore", history.length() == HISTORY_LIMIT && rows.next());
             }
         }
+    }
+
+    static JSONObject review(ResultSet row, Accounts.Account account, int id) throws SQLException {
+        Schedule schedule = new Schedule(row);
+        if (!schedule.isReviewer(account) || !schedule.awaiting()) return null;
+        return new JSONObject().put("start", schedule.newStart()).put("due", schedule.requestedDue)
+            .put("reason", HtmlUtils.htmlUnescape(schedule.reason)).put("revision", schedule.revision(id))
+            .put("canApprove", schedule.canApprove(account));
     }
 
     static Result request(Connection db, Accounts.Account account, int id, LocalDate start, LocalDate due,
@@ -110,41 +137,80 @@ final class TaskDates {
         return Result.SAVED;
     }
 
-    @SuppressWarnings("deprecation")
+    static Rejection requestBatch(Connection db, Accounts.Account account, Map<Integer, Proposal> items, LocalDateTime now) throws SQLException {
+        db.setAutoCommit(false);
+        try {
+            for (Map.Entry<Integer, Proposal> entry : items.entrySet()) {
+                int id = entry.getKey();
+                Proposal proposal = entry.getValue();
+                Schedule row = load(db, account, id, true);
+                Result result;
+                if (row == null || !row.isTeamLead(account)) result = Result.MISSING;
+                else if (!proposal.revision.equals(row.revision(id))) result = Result.CHANGED;
+                else result = requestLocked(db, account, id, row, proposal.start, proposal.due, proposal.reason, now);
+                if (result != Result.SAVED) {
+                    db.rollback();
+                    return new Rejection(result, id);
+                }
+            }
+            db.commit();
+            return null;
+        } catch (SQLException | RuntimeException failure) {
+            db.rollback();
+            throw failure;
+        }
+    }
+
     static Result approve(Connection db, SessionFactory factory, Accounts.Account account, int id, String revision,
                           LocalDateTime now) throws SQLException {
+        Rejection rejection = approveBatch(db, factory, account, Collections.singletonMap(id, revision), now);
+        return rejection == null ? Result.SAVED : rejection.result;
+    }
+
+    @SuppressWarnings("deprecation")
+    static Rejection approveBatch(Connection db, SessionFactory factory, Accounts.Account account, Map<Integer, String> items,
+                                 LocalDateTime now) throws SQLException {
         try (Session session = factory.withOptions().connection(db).openSession()) {
             Transaction transaction = session.beginTransaction();
             try {
-                Schedule row = load(db, account, id, true);
-                Result result;
-                if (row == null || !row.isReviewer(account)) result = Result.MISSING;
-                else if (!row.awaiting() || !revision.equals(row.revision(id))) result = Result.CHANGED;
-                else if (!row.canApprove(account)) result = Result.INVALID_RANGE;
-                else {
-                    updateDates(db, id, row, now);
-                    ClassMetadata mapping = factory.getClassMetadata(HISTORY_ENTITY);
-                    Object history = LegacyRecord.create(mapping);
-                    mapping.setPropertyValue(history, "TASK_ID", Integer.toString(id));
-                    mapping.setPropertyValue(history, "START_DATE", row.start);
-                    mapping.setPropertyValue(history, "END_DATE", row.due);
-                    mapping.setPropertyValue(history, "REVISE_START_DATE", row.newStart());
-                    mapping.setPropertyValue(history, "REVISE_END_DATE", row.requestedDue);
-                    mapping.setPropertyValue(history, "APPROVED_DATE", now.toLocalDate().toString());
-                    mapping.setPropertyValue(history, "APPROVED_BY", account.fullname);
-                    mapping.setPropertyValue(history, "REVISE_REASON", encodeReason(HtmlUtils.htmlUnescape(row.reason)));
-                    session.save(HISTORY_ENTITY, history);
-                    session.flush();
-                    result = Result.SAVED;
+                for (Map.Entry<Integer, String> entry : items.entrySet()) {
+                    int id = entry.getKey();
+                    Result result = approveLocked(db, session, factory, account, id, entry.getValue(), now);
+                    if (result != Result.SAVED) {
+                        transaction.rollback();
+                        return new Rejection(result, id);
+                    }
                 }
+                session.flush();
                 transaction.commit();
-                return result;
+                return null;
             } catch (SQLException | RuntimeException failure) {
                 if (transaction.getStatus().canRollback()) transaction.rollback();
                 if (failure instanceof SQLException) throw (SQLException) failure;
                 throw new SQLException("SCM date approval failed", failure);
             }
         }
+    }
+
+    private static Result approveLocked(Connection db, Session session, SessionFactory factory, Accounts.Account account,
+                                        int id, String revision, LocalDateTime now) throws SQLException {
+        Schedule row = load(db, account, id, true);
+        if (row == null || !row.isReviewer(account)) return Result.MISSING;
+        if (!row.awaiting() || !revision.equals(row.revision(id))) return Result.CHANGED;
+        if (!row.canApprove(account)) return Result.INVALID_RANGE;
+        updateDates(db, id, row, now);
+        ClassMetadata mapping = factory.getClassMetadata(HISTORY_ENTITY);
+        Object history = LegacyRecord.create(mapping);
+        mapping.setPropertyValue(history, "TASK_ID", Integer.toString(id));
+        mapping.setPropertyValue(history, "START_DATE", row.start);
+        mapping.setPropertyValue(history, "END_DATE", row.due);
+        mapping.setPropertyValue(history, "REVISE_START_DATE", row.newStart());
+        mapping.setPropertyValue(history, "REVISE_END_DATE", row.requestedDue);
+        mapping.setPropertyValue(history, "APPROVED_DATE", now.toLocalDate().toString());
+        mapping.setPropertyValue(history, "APPROVED_BY", account.fullname);
+        mapping.setPropertyValue(history, "REVISE_REASON", encodeReason(HtmlUtils.htmlUnescape(row.reason)));
+        session.save(HISTORY_ENTITY, history);
+        return Result.SAVED;
     }
 
     private static void updateDates(Connection db, int id, Schedule row, LocalDateTime now) throws SQLException {

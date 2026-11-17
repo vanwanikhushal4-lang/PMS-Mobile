@@ -11,7 +11,7 @@ import { color } from './theme';
 
 const conflict = 'These dates have changed. Review the updated request before continuing.';
 
-function describe(error: unknown) {
+export function describeDateError(error: unknown) {
   const code = error instanceof AuthError ? error.code : null;
   if (code === 'date-range') return 'Enter a valid date range that changes the schedule.';
   if (code === 'date-reason-length') return 'Shorten the reason so it fits in SCM.';
@@ -84,7 +84,7 @@ export function TaskDatePanel({ id, onChanged }: { id: number; onChanged: (actio
       const code = failure instanceof AuthError ? failure.code : null;
       if (code === 'expired') expire(grant.sessionToken);
       else {
-        setError(describe(failure));
+        setError(describeDateError(failure));
         if (code === 'date-change-conflict' || code === 'not-found' || code === 'forbidden') {
           setEditing(null);
           reload();
@@ -106,11 +106,8 @@ export function TaskDatePanel({ id, onChanged }: { id: number; onChanged: (actio
       {result.code !== 'not-found' && result.code !== 'forbidden' ? <TextAction label="Try again" onPress={reload} /> : null}
     </> : null}
     {result.kind === 'ready' ? <>
-      <View style={styles.dates}>
-        <Dates label="Current dates" start={result.data.start} due={result.data.due} />
-        {result.data.revision ? <Dates label="Proposed dates" start={result.data.requestedStart || result.data.start}
-          due={result.data.requestedDue} proposed /> : null}
-      </View>
+      <DateComparison current={result.data} proposed={result.data.revision
+        ? { start: result.data.requestedStart || result.data.start, due: result.data.requestedDue } : undefined} />
       {result.data.approval ? <Text style={[type.eyebrow, result.data.approval === 'Date Approved' && styles.approved]}>{result.data.approval}</Text> : null}
       {result.data.reason ? <Text style={type.body}>{result.data.reason}</Text> : null}
       {!editing && result.data.requestMode !== 'none'
@@ -118,15 +115,8 @@ export function TaskDatePanel({ id, onChanged }: { id: number; onChanged: (actio
       {!editing && result.data.canApprove
         ? <TextAction label="Review request" testID="open-date-approval" onPress={() => edit(result.data, 'approve')} /> : null}
       {editing ? <Phase key={editing} shift={12}><View style={styles.editor}>
-        {editing === 'request' ? <>
-          {result.data.requestMode === 'schedule' ? <Field label="Proposed start date" placeholder="DD.MM.YYYY" value={start}
-            onChangeText={setStart} maxLength={10} editable={!busy} testID="date-request-start" /> : null}
-          <Field label="Proposed due date" placeholder="DD.MM.YYYY" value={due} onChangeText={setDue}
-            maxLength={10} editable={!busy} testID="date-request-due" />
-          <Field label="Reason" placeholder={result.data.requestMode === 'schedule' ? 'Required if the start date changes' : 'Optional'} value={reason}
-            onChangeText={setReason} multiline autoCapitalize="sentences" maxLength={255} editable={!busy}
-            testID="date-request-reason" style={styles.reason} />
-        </> : <>
+        {editing === 'request' ? <DateProposalFields start={result.data.requestMode === 'schedule' ? start : undefined}
+          due={due} reason={reason} onStart={setStart} onDue={setDue} onReason={setReason} busy={busy} /> : <>
           <Text style={styles.title}>Apply these dates?</Text>
           <Text style={type.body}>SCM will update the task schedule and record your approval in its history.</Text>
         </>}
@@ -146,6 +136,30 @@ export function TaskDatePanel({ id, onChanged }: { id: number; onChanged: (actio
         {result.data.hasMore ? <Text style={type.caption}>Showing the 20 latest approvals</Text> : null}
       </View> : null}
     </> : null}
+  </View>;
+}
+
+export function DateProposalFields({ start, due, reason, onStart, onDue, onReason, busy = false, requireReason = false }: {
+  start?: string; due: string; reason: string; onStart: (value: string) => void;
+  onDue: (value: string) => void; onReason: (value: string) => void; busy?: boolean; requireReason?: boolean;
+}) {
+  return <>
+    {start !== undefined ? <Field label="Proposed start date" placeholder="DD.MM.YYYY" value={start}
+      onChangeText={onStart} maxLength={10} editable={!busy} testID="date-request-start" /> : null}
+    <Field label="Proposed due date" placeholder="DD.MM.YYYY" value={due} onChangeText={onDue}
+      maxLength={10} editable={!busy} testID="date-request-due" />
+    <Field label="Reason" placeholder={requireReason ? 'Required' : start !== undefined ? 'Required if the start date changes' : 'Optional'}
+      value={reason} onChangeText={onReason} multiline autoCapitalize="sentences" maxLength={255} editable={!busy}
+      testID="date-request-reason" style={styles.reason} />
+  </>;
+}
+
+export function DateComparison({ current, proposed }: {
+  current: { start: string; due: string }; proposed?: { start: string; due: string };
+}) {
+  return <View style={styles.dates}>
+    <Dates label="Current dates" start={current.start} due={current.due} />
+    {proposed ? <Dates label="Proposed dates" start={proposed.start} due={proposed.due} proposed /> : null}
   </View>;
 }
 

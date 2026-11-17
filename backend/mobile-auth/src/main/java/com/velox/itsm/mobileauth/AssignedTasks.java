@@ -57,24 +57,32 @@ final class AssignedTasks {
             + " AND (t.MANAGER_NAME=?" + (leadRoute ? " OR (COALESCE(t.updateStarts_Date,'')='' AND t.TEAM_LEADER=?)" : "") + ")";
         String filter;
         switch (queue) {
-            case "mine": filter = MINE + " AND t.updateDate_Status IN ('Pending for approval','Date Approved')"; break;
+            case "mine":
+                filter = " AND (t.DEVELOPER_NAME=? OR (t.TEAM_LEADER=? AND t.dateUpdateBy=?))"
+                    + " AND t.updateDate_Status IN ('Pending for approval','Date Approved')";
+                break;
             case "team":
                 filter = " AND t.TEAM_LEADER=? AND " + PENDING + (leadRoute ? "" : " AND 1=0");
                 break;
             default: filter = reviews;
         }
-        String sql = TASK_FIELDS + SCOPED + filter
+        boolean review = "review".equals(queue);
+        String sql = TASK_FIELDS + (review ? TaskDates.PROPOSAL_FIELDS : "") + SCOPED + filter
             + (before == 0 ? "" : " AND t.SR_NO<?") + " ORDER BY t.SR_NO DESC LIMIT " + (PAGE_SIZE + 1);
         try (PreparedStatement query = db.prepareStatement(sql)) {
             bind(query, account);
             int parameter = 4;
-            if ("review".equals(queue)) {
+            if (review) {
                 query.setString(parameter++, account.fullname);
                 query.setString(parameter++, account.fullname);
                 if (leadRoute) query.setString(parameter++, account.fullname);
             }
+            if ("mine".equals(queue)) {
+                query.setString(parameter++, account.fullname);
+                query.setString(parameter++, account.fullname);
+            }
             if (before != 0) query.setInt(parameter, before);
-            return page(query, account);
+            return page(query, account, review);
         }
     }
 
@@ -111,6 +119,10 @@ final class AssignedTasks {
     }
 
     private static JSONObject page(PreparedStatement query, Accounts.Account account) throws SQLException {
+        return page(query, account, false);
+    }
+
+    private static JSONObject page(PreparedStatement query, Accounts.Account account, boolean review) throws SQLException {
         try (ResultSet rows = query.executeQuery()) {
             JSONArray items = new JSONArray();
             int last = 0;
@@ -125,7 +137,7 @@ final class AssignedTasks {
                     || account.fullname.equalsIgnoreCase(manager);
                 boolean history = account.fullname.equalsIgnoreCase(developer) && ("Completed".equalsIgnoreCase(status)
                     || ("Pending".equalsIgnoreCase(status) && (dateApproval.isEmpty() || "Date Approved".equalsIgnoreCase(dateApproval))));
-                items.put(new JSONObject().put("id", last)
+                JSONObject item = new JSONObject().put("id", last)
                     .put("module", HtmlUtils.htmlUnescape(label(rows, "MODULE_NAME"))).put("status", status).put("workLog", history)
                     .put("reassignable", !status.isEmpty() && !"Completed".equalsIgnoreCase(status) && TaskAssignments.manages(account, lead, manager))
                     .put("dateAccess", dateAccess).put("dateApproval", dateAccess ? dateApproval : "")
@@ -134,7 +146,9 @@ final class AssignedTasks {
                     .put("customer", label(rows, "CUSTOMERNAME")).put("suite", label(rows, "PRODUCTSUIT"))
                     .put("tool", label(rows, "PRODUCTTOOL")).put("description", HtmlUtils.htmlUnescape(label(rows, "DESCRIPTION")))
                     .put("lead", lead).put("developer", developer)
-                    .put("assigner", label(rows, "ASSIGNBY")).put("start", label(rows, "START_DATE")).put("due", label(rows, "END_DATE")));
+                    .put("assigner", label(rows, "ASSIGNBY")).put("start", label(rows, "START_DATE")).put("due", label(rows, "END_DATE"));
+                if (review) item.put("dateReview", TaskDates.review(rows, account, last));
+                items.put(item);
             }
             Object next = items.length() == PAGE_SIZE && rows.next() ? last : JSONObject.NULL;
             return new JSONObject().put("kind", "assigned-tasks").put("items", items).put("next", next);

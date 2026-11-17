@@ -2,7 +2,7 @@ import { decodeAuthStep, type AuthStep } from './auth-contract.ts';
 import { decodeWorkspace } from './workspace-contract.ts';
 import { decodeProfile, decodeProject, decodeProjectRecords, decodeProjects } from './projects-contract.ts';
 import { decodeAssignedTasks, decodeTaskAssignees, decodeTaskContexts, decodeTaskDates, decodeWorkLog,
-  type DateQueue, type StandaloneTask, type TaskContext, type TaskDraft, type TaskTransfer } from './tasks-contract.ts';
+  type DateApproval, type DateProposal, type DateQueue, type StandaloneTask, type TaskContext, type TaskDraft, type TaskTransfer } from './tasks-contract.ts';
 
 export type AuthConfig = { url: URL; fixture: boolean };
 export type Grant = { sessionToken: string; expiresAt: number };
@@ -78,12 +78,21 @@ function validTaskId(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 && value <= 2_147_483_647;
 }
 
+function confirmedBatch(result: unknown, kind: string, items: readonly { id: number }[]) {
+  const data = jsonObject(result);
+  const expected = items.map((item) => item.id).sort((a, b) => a - b);
+  const ids = data.taskIds;
+  if (data.kind !== kind || !Array.isArray(ids) || ids.length !== expected.length
+      || expected.some((id, index) => ids[index] !== id)) throw new AuthError('bad-response');
+}
+
 export function createAuthClient(config: AuthConfig, send: Requester = fetch, timeoutMs = 9000) {
   async function request(path: string, body: object | undefined, signal?: AbortSignal, token?: string) {
     const url = new URL(path, config.url);
     const missingReason = ['projects/detail', 'projects/records', 'projects/tasks', 'projects/favorite',
       'tasks/assignments/project-options', 'tasks/assignments/create'].includes(path) ? 'project-not-found'
       : ['tasks/work-log', 'tasks/progress', 'tasks/complete', 'tasks/dates/detail', 'tasks/dates/request', 'tasks/dates/approve',
+        'tasks/dates/request-batch', 'tasks/dates/approve-batch',
         'tasks/assignments/options', 'tasks/assignments/reassign', 'tasks/assignments/reassign-bulk'].includes(path) ? 'task-not-found'
         : path.startsWith('tasks/assignments/standalone-') ? 'context-not-found' : null;
     const abort = new AbortController();
@@ -115,10 +124,12 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
         const { kind, reason } = jsonObject(data);
         if (kind === 'rejected' && (reason === 'progress-already-logged' || reason === 'task-closed')) throw new AuthError(reason);
       }
-      if ((path === 'tasks/dates/request' || path === 'tasks/dates/approve') && (response.status === 409 || response.status === 400)) {
-        const { kind, reason } = jsonObject(data);
+      if (path.startsWith('tasks/dates/') && (response.status === 409 || response.status === 400)) {
+        const { kind, reason, taskId } = jsonObject(data);
         if (kind === 'rejected' && (((reason === 'date-range' || reason === 'date-reason-length') && response.status === 400)
-            || ((reason === 'date-change-conflict' || reason === 'date-no-reviewer') && response.status === 409))) throw new AuthError(reason);
+            || ((reason === 'date-change-conflict' || reason === 'date-no-reviewer') && response.status === 409))) {
+          throw new AuthError(reason, validTaskId(taskId) ? taskId : undefined);
+        }
       }
       if (path.startsWith('tasks/assignments/') && (response.status === 400 || response.status === 409)) {
         const { kind, reason, taskId } = jsonObject(data);
@@ -228,6 +239,14 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       const data = jsonObject(await request('tasks/dates/approve', { id, revision }, signal, grant.sessionToken));
       if (data.kind !== 'task-dates-approved' || data.taskId !== id) throw new AuthError('bad-response');
     },
+    requestTaskDatesBatch: async (grant: Grant, items: readonly DateProposal[], signal?: AbortSignal) => {
+      const data = await request('tasks/dates/request-batch', { items }, signal, grant.sessionToken);
+      confirmedBatch(data, 'task-date-batch-requested', items);
+    },
+    approveTaskDatesBatch: async (grant: Grant, items: readonly DateApproval[], signal?: AbortSignal) => {
+      const data = await request('tasks/dates/approve-batch', { items }, signal, grant.sessionToken);
+      confirmedBatch(data, 'task-date-batch-approved', items);
+    },
     assignmentQueue: async (grant: Grant, before?: number, signal?: AbortSignal) => {
       const data = decodeAssignedTasks(await request('tasks/assignments/list', { before }, signal, grant.sessionToken));
       if (!data || (before !== undefined && data.items.some((task) => task.id >= before))) throw new AuthError('bad-response');
@@ -263,11 +282,8 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       if (data.kind !== 'task-reassigned' || data.taskId !== id) throw new AuthError('bad-response');
     },
     reassignTasks: async (grant: Grant, items: readonly TaskTransfer[], signal?: AbortSignal) => {
-      const data = jsonObject(await request('tasks/assignments/reassign-bulk', { items }, signal, grant.sessionToken));
-      const expected = items.map((item) => item.id).sort((a, b) => a - b);
-      const ids = data.taskIds;
-      if (data.kind !== 'tasks-reassigned' || !Array.isArray(ids) || ids.length !== expected.length
-          || expected.some((id, index) => ids[index] !== id)) throw new AuthError('bad-response');
+      const data = await request('tasks/assignments/reassign-bulk', { items }, signal, grant.sessionToken);
+      confirmedBatch(data, 'tasks-reassigned', items);
     },
     signOut: async (grant: Grant, signal?: AbortSignal) => { await request('sign-out', {}, signal, grant.sessionToken); },
     startRecovery: async (details: { companyCode: string; username: string; channel: 'email' | 'sms' }, signal?: AbortSignal) => decodeRecovery(await request('recovery/start', details, signal)),

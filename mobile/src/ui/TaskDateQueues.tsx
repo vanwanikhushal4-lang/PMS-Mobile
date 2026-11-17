@@ -5,6 +5,7 @@ import { authClient } from '../scm/auth-config';
 import { useProtectedRead } from '../scm/protected-read';
 import type { DateQueue } from '../scm/tasks-contract';
 import { FormMessage, Phase, TextAction } from './Access';
+import { BulkTaskDates } from './BulkTaskDates';
 import { Action, Icon, type } from './Primitives';
 import { TaskDatePanel } from './TaskDatePanel';
 import { WorkspaceTabs } from './Workspace';
@@ -19,6 +20,7 @@ export function TaskDateQueues({ initialTask }: { initialTask: number | null }) 
   const [open, setOpen] = useState<number | null>(initialTask);
   const [pages, setPages] = useState<number[]>([]);
   const [message, setMessage] = useState(initialTask ? 'Date request sent' : '');
+  const [batch, setBatch] = useState(false);
   const queue = queues[tab.index];
   const before = pages.at(-1);
   const read = useCallback((grant: Grant, signal: AbortSignal) => {
@@ -33,6 +35,7 @@ export function TaskDateQueues({ initialTask }: { initialTask: number | null }) 
     setMessage('');
     setOpen(null);
     setPages([]);
+    setBatch(false);
   }
 
   return <View style={styles.content}>
@@ -43,8 +46,21 @@ export function TaskDateQueues({ initialTask }: { initialTask: number | null }) 
       <FormMessage message="Couldn’t load this date queue." />
       <TextAction label="Try again" onPress={reload} />
     </> : null}
+    {batch ? <BulkTaskDates approve={queue === 'review'} items={result.kind === 'ready' ? result.data.items : []}
+      cancel={() => setBatch(false)} onStale={reload} onSaved={(count) => {
+        if (queue === 'team') select(0);
+        setMessage(count + (queue === 'review' ? ' date requests approved' : ' date requests sent'));
+        setOpen(null);
+        setPages([]);
+        setBatch(false);
+        reload();
+      }} /> : null}
     {result.kind === 'ready' ? <Phase key={queue + ':' + (before ?? '')} shift={tab.shift}>
-      {result.data.items.length ? <View style={styles.rows}>
+      {!batch && (queue === 'team' ? result.data.items.length > 0
+        : queue === 'review' && result.data.items.some((task) => task.dateReview?.canApprove))
+        ? <Action label={queue === 'review' ? 'Approve several requests' : 'Propose dates for several tasks'} secondary
+          testID="open-date-batch" onPress={() => { setMessage(''); setBatch(true); }} /> : null}
+      {!batch && (result.data.items.length ? <View style={styles.rows}>
         {result.data.items.map((task) => <View key={task.id} style={styles.card}>
           <Pressable accessibilityRole="button" accessibilityState={{ expanded: task.id === open }}
             onPress={() => setOpen(task.id === open ? null : task.id)} testID={'date-task-' + task.id}
@@ -64,7 +80,7 @@ export function TaskDateQueues({ initialTask }: { initialTask: number | null }) 
             }} />
           </View></Phase> : null}
         </View>)}
-      </View> : <Text style={type.body}>{emptyMessages[tab.index]}</Text>}
+      </View> : <Text style={type.body}>{emptyMessages[tab.index]}</Text>)}
       {before || result.data.next ? <View style={styles.actions}>
         {before ? <Action label="Previous page" icon="back" secondary onPress={() => { setOpen(null); setPages(pages.slice(0, -1)); }} /> : null}
         {result.data.next ? <Action label="Next page" secondary onPress={() => {

@@ -4,10 +4,12 @@ import com.velox.itsm.mobileauth.Accounts.Account;
 import java.security.MessageDigest;
 import java.sql.SQLException;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -15,6 +17,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
 import java.util.function.ToLongFunction;
 import java.util.logging.Logger;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 public final class AuthService implements AutoCloseable {
@@ -52,6 +55,7 @@ public final class AuthService implements AutoCloseable {
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
+            case "tasks/dates/request-batch": case "tasks/dates/approve-batch":
             case "tasks/assignments/list": case "tasks/assignments/project-options": case "tasks/assignments/options":
             case "tasks/assignments/create": case "tasks/assignments/reassign": case "tasks/assignments/reassign-bulk":
             case "tasks/assignments/contexts": case "tasks/assignments/standalone-options": case "tasks/assignments/standalone-create":
@@ -232,6 +236,7 @@ public final class AuthService implements AutoCloseable {
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
+            case "tasks/dates/request-batch": case "tasks/dates/approve-batch":
             case "tasks/assignments/list": case "tasks/assignments/project-options": case "tasks/assignments/options":
             case "tasks/assignments/create": case "tasks/assignments/reassign": case "tasks/assignments/reassign-bulk":
             case "tasks/assignments/contexts": case "tasks/assignments/standalone-options": case "tasks/assignments/standalone-create":
@@ -337,6 +342,9 @@ public final class AuthService implements AutoCloseable {
                 || (paging && !AssignedTasks.validId(input.opt("before")))) return rejected(400, "invalid-filter");
             return reply(200, accounts.dateQueue(account, input.optInt("before"), queue));
         }
+        if (action.endsWith("-batch")) {
+            return dateBatch("tasks/dates/approve-batch".equals(action), input, account, TaskProgress.localTime(now));
+        }
         if (!AssignedTasks.validId(input.opt("id"))) return rejected(400, "invalid-filter");
         int id = input.getInt("id");
         if ("tasks/dates/detail".equals(action)) {
@@ -354,22 +362,69 @@ public final class AuthService implements AutoCloseable {
             for (String key : input.keySet()) {
                 if (!("id".equals(key) || "start".equals(key) || "due".equals(key) || "reason".equals(key))) return rejected(400, "invalid-filter");
             }
-            LocalDate due = TaskDates.parse(string(input, "due", 10));
-            LocalDate start = TaskDates.parse(string(input, "start", 10));
-            String reason = TaskDates.encodeReason(string(input, "reason", 255).trim());
-            if (due == null || (input.has("start") && start == null)) return rejected(400, "date-range");
-            if (input.has("reason") && (!(input.opt("reason") instanceof String) || input.getString("reason").length() > 255))
-                return rejected(400, "invalid-filter");
-            if (reason.length() > 255) return rejected(400, "date-reason-length");
-            result = accounts.requestDates(account, id, start, due, reason, TaskProgress.localTime(now));
+            TaskDates.Proposal proposal = dateProposal(input);
+            TaskDates.Result error = dateProposalError(input, proposal);
+            if (error != null) return dateRejected(error, 0);
+            result = accounts.requestDates(account, id, proposal.start, proposal.due, proposal.reason, TaskProgress.localTime(now));
         }
+        return result == TaskDates.Result.SAVED
+            ? reply(200, new JSONObject().put("kind", approve ? "task-dates-approved" : "task-dates-requested").put("taskId", id))
+            : dateRejected(result, 0);
+    }
+
+    private Reply dateBatch(boolean approve, JSONObject input, Account account, LocalDateTime now) throws SQLException {
+        JSONArray entries = input.length() == 1 ? input.optJSONArray("items") : null;
+        if (entries == null || entries.length() < 2 || entries.length() > 20) return rejected(400, "invalid-filter");
+        Map<Integer, String> revisions = new TreeMap<>();
+        Map<Integer, TaskDates.Proposal> proposals = new TreeMap<>();
+        for (int index = 0; index < entries.length(); index++) {
+            JSONObject item = entries.optJSONObject(index);
+            if (item == null || item.length() != (approve ? 2 : 5) || !AssignedTasks.validId(item.opt("id"))
+                    || !TaskAssignments.token(item.opt("revision"))) return rejected(400, "invalid-filter");
+            int id = item.getInt("id");
+            if (revisions.put(id, item.getString("revision")) != null) return rejected(400, "invalid-filter");
+            if (!approve) {
+                if (!item.has("start") || !item.has("due") || !item.has("reason")) return rejected(400, "invalid-filter");
+                TaskDates.Proposal proposal = dateProposal(item);
+                TaskDates.Result error = dateProposalError(item, proposal);
+                if (error != null) return dateRejected(error, id);
+                proposals.put(id, proposal);
+            }
+        }
+        TaskDates.Rejection rejection = approve ? accounts.approveDatesBatch(account, revisions, now) : accounts.requestDatesBatch(account, proposals, now);
+        if (rejection != null) return dateRejected(rejection.result, rejection.id);
+        return reply(200, new JSONObject().put("kind", approve ? "task-date-batch-approved" : "task-date-batch-requested")
+            .put("taskIds", new JSONArray(revisions.keySet())));
+    }
+
+    private static TaskDates.Proposal dateProposal(JSONObject input) {
+        return new TaskDates.Proposal(TaskDates.parse(string(input, "start", 10)), TaskDates.parse(string(input, "due", 10)),
+            TaskDates.encodeReason(string(input, "reason", 255).trim()), string(input, "revision", 43));
+    }
+
+    private static TaskDates.Result dateProposalError(JSONObject input, TaskDates.Proposal proposal) {
+        if (proposal.due == null || (input.has("start") && proposal.start == null)) return TaskDates.Result.INVALID_RANGE;
+        if (input.has("reason") && (!(input.opt("reason") instanceof String) || input.getString("reason").length() > 255))
+            return TaskDates.Result.INVALID_INPUT;
+        if (proposal.reason.length() > 255) return TaskDates.Result.REASON_LENGTH;
+        return null;
+    }
+
+    private static Reply dateRejected(TaskDates.Result result, int id) {
+        int status;
+        String reason;
         switch (result) {
-            case MISSING: return rejected(404, "task-not-found");
-            case CHANGED: return rejected(409, "date-change-conflict");
-            case INVALID_RANGE: return rejected(400, "date-range");
-            case NO_REVIEWER: return rejected(409, "date-no-reviewer");
-            default: return reply(200, new JSONObject().put("kind", approve ? "task-dates-approved" : "task-dates-requested").put("taskId", id));
+            case MISSING: status = 404; reason = "task-not-found"; break;
+            case CHANGED: status = 409; reason = "date-change-conflict"; break;
+            case INVALID_RANGE: status = 400; reason = "date-range"; break;
+            case NO_REVIEWER: status = 409; reason = "date-no-reviewer"; break;
+            case REASON_LENGTH: status = 400; reason = "date-reason-length"; break;
+            case INVALID_INPUT: status = 400; reason = "invalid-filter"; break;
+            default: throw new IllegalArgumentException("Unexpected date result");
         }
+        JSONObject body = new JSONObject().put("kind", "rejected").put("reason", reason);
+        if (id > 0) body.put("taskId", id);
+        return reply(status, body);
     }
 
     private Reply updateTask(String action, JSONObject input, Account account, long now) throws SQLException {

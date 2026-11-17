@@ -3,6 +3,7 @@ export type AssignedTask = {
   description: string; lead: string; developer: string; assigner: string; start: string; due: string;
   workLog: boolean; dateAccess: boolean; dateApproval: string; reassignable: boolean;
   reference: string; priority: string; weight: string; function: string; responsibility: string;
+  dateReview: DateReview | null;
 };
 export type AssignedTaskPage = { items: AssignedTask[]; next: number | null };
 export type WorkLog = {
@@ -10,6 +11,9 @@ export type WorkLog = {
   hasMore: boolean; date: string; completed: boolean; loggedToday: boolean;
 };
 export type DateQueue = 'mine' | 'team' | 'review';
+export type DateApproval = { id: number; revision: string };
+export type DateProposal = DateApproval & { start: string; due: string; reason: string };
+type DateReview = { revision: string; start: string; due: string; reason: string; canApprove: boolean };
 export type TaskAssignee = { key: string; name: string; role: string; lead: string; manager: string };
 export type TaskContext = { customer: string; suite: string; tool: string };
 export type StandaloneTask = { context: TaskContext; function: string; responsibility: string };
@@ -19,7 +23,7 @@ export type TaskDraft = {
 };
 export type TaskDates = {
   taskId: number; start: string; due: string; approval: string; requestedStart: string; requestedDue: string; reason: string;
-  revision: string | null; requestMode: 'due' | 'schedule' | 'none'; canApprove: boolean; hasMore: boolean;
+  revision: string | null; scheduleRevision: string | null; requestMode: 'due' | 'schedule' | 'none'; canApprove: boolean; hasMore: boolean;
   history: { id: number; start: string; due: string; revisedStart: string; revisedDue: string; approvedAt: string; by: string; reason: string }[];
 };
 
@@ -31,6 +35,16 @@ function id(value: unknown): value is number {
 }
 function label(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 500;
+}
+function revisionToken(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value);
+}
+function decodeDateReview(value: unknown): DateReview | null {
+  const row = object(value);
+  if (!row) return null;
+  const { start, due, reason, revision, canApprove } = row;
+  return label(start) && label(due) && label(reason) && revisionToken(revision) && typeof canApprove === 'boolean'
+    ? { start, due, reason, revision, canApprove } : null;
 }
 
 export function decodeAssignedTasks(value: unknown): AssignedTaskPage | null {
@@ -49,8 +63,10 @@ export function decodeAssignedTasks(value: unknown): AssignedTaskPage | null {
       || !label(lead) || !label(developer) || !label(assigner) || !label(start) || !label(due) || typeof workLog !== 'boolean'
       || typeof dateAccess !== 'boolean' || !label(dateApproval) || typeof reassignable !== 'boolean'
       || !label(reference) || !label(priority) || !label(weight) || !label(functionName) || !label(responsibility)) return null;
+    const dateReview = decodeDateReview(row.dateReview);
+    if (row.dateReview !== undefined && row.dateReview !== null && (!dateReview || !dateAccess)) return null;
     items.push({ id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due,
-      workLog, dateAccess, dateApproval, reassignable, reference, priority, weight, function: functionName, responsibility });
+      workLog, dateAccess, dateApproval, reassignable, reference, priority, weight, function: functionName, responsibility, dateReview });
   }
   const next = body.next;
   if (next !== null && (!id(next) || items.length !== 30 || items.at(-1)?.id !== next)) return null;
@@ -61,7 +77,7 @@ export function decodeTaskAssignees(value: unknown) {
   const body = object(value);
   if (body?.kind !== 'task-assignees' || (body.id !== null && !id(body.id)) || typeof body.hasMore !== 'boolean'
     || !Array.isArray(body.items) || body.items.length > 30 || (body.hasMore && body.items.length !== 30)
-    || (body.revision !== null && (typeof body.revision !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.revision)))) return null;
+    || (body.revision !== null && !revisionToken(body.revision))) return null;
   const items: TaskAssignee[] = [];
   const keys = new Set<string>();
   for (const raw of body.items as unknown[]) {
@@ -114,9 +130,10 @@ export function decodeTaskDates(value: unknown): TaskDates | null {
   const body = object(value);
   if (body?.kind !== 'task-dates' || !id(body.taskId) || typeof body.canApprove !== 'boolean' || typeof body.hasMore !== 'boolean'
     || !Array.isArray(body.history) || body.history.length > 20 || (body.hasMore && body.history.length !== 20)) return null;
-  const { start, due, approval, requestedStart, requestedDue, reason, revision, requestMode } = body;
+  const { start, due, approval, requestedStart, requestedDue, reason, revision, scheduleRevision = null, requestMode } = body;
   if (!label(start) || !label(due) || !label(approval) || !label(requestedStart) || !label(requestedDue) || !label(reason)
-    || (revision !== null && (typeof revision !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(revision)))
+    || (revision !== null && !revisionToken(revision)) || (scheduleRevision !== null && !revisionToken(scheduleRevision))
+    || (revision !== null && scheduleRevision !== null && scheduleRevision !== revision)
     || (body.canApprove && revision === null) || (revision !== null && requestMode !== 'none')
     || (requestMode !== 'none' && requestMode !== 'due' && requestMode !== 'schedule')) return null;
   const history: TaskDates['history'] = [];
@@ -130,7 +147,7 @@ export function decodeTaskDates(value: unknown): TaskDates | null {
     history.push({ id: number, start, due, revisedStart, revisedDue, approvedAt, by, reason });
   }
   return { taskId: body.taskId, start, due, approval, requestedStart, requestedDue, reason,
-    revision, requestMode, canApprove: body.canApprove, history, hasMore: body.hasMore };
+    revision, scheduleRevision, requestMode, canApprove: body.canApprove, history, hasMore: body.hasMore };
 }
 
 export function decodeWorkLog(value: unknown): WorkLog | null {

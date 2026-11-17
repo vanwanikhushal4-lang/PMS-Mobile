@@ -32,7 +32,7 @@ import org.springframework.web.servlet.support.AbstractAnnotationConfigDispatche
 public class StagingInitializer extends AbstractAnnotationConfigDispatcherServletInitializer {
     private boolean testDelivery;
     @Override public void onStartup(ServletContext context) throws ServletException {
-        testDelivery = "/scm-auth-qa".equals(context.getContextPath());
+        testDelivery = "/scm-auth-qa".equals(context.getContextPath()) || "/scm-auth-dates-qa".equals(context.getContextPath());
         if ("/scm-auth-strict".equals(context.getContextPath())) context.setInitParameter("spring.profiles.active", "scm-mobile-auth");
         super.onStartup(context);
     }
@@ -97,6 +97,9 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 seed(connection, 6, "directory", "Maya Sen", "Engineer", "AD", "dir@fixture.invalid", "+12025550106", "QA Service Operations", "QA-A", "off", null, null, true);
                 seed(connection, 7, "disabled", "Ari Shah", "Developer", "Non-AD", "ari@fixture.invalid", "+12025550107", "QA Service Operations", "QA-A", "off", hash, null, false);
                 seed(connection, 8, "phone", "Gia Gupta", "Implementor", "Non-AD", "gia@fixture.invalid", "+12025550108", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 9, "schedule-lead", "Leah Thomas", "Developer", "Non-AD", "leah@fixture.invalid", "+12025550109", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 10, "schedule-manager", "Raj Nair", "Implementor", "Non-AD", "raj@fixture.invalid", "+12025550110", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 11, "schedule-assignee", "Mira Desai", "Tester", "Non-AD", "mira@fixture.invalid", "+12025550111", "QA Service Operations", "QA-A", "off", hash, null, true);
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Pune', BRANCH='West office', DEPARTMENT='Commercial operations', SUB_DEPARTMENT='Delivery' WHERE LOGINID=1");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Chennai', BRANCH='South office', DEPARTMENT='Engineering' WHERE LOGINID=2");
                 sql.execute("CREATE TABLE ProjectData (SR_NO INT PRIMARY KEY, PROJECTNAME VARCHAR(500), CUSTOMERNAME VARCHAR(500), FUNCTION_NAME VARCHAR(500), RESPONSIBILITY VARCHAR(500), PRODUCTSUIT VARCHAR(500), PRODUCTTOOL VARCHAR(500), Task_ID VARCHAR(500))");
@@ -148,9 +151,17 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " (212,'Pending','Riverside Works','Service Operations','VPN Access','Coordinate on-site testing.','Site handoff','Alex Rao','Noor Paul','02.12.2026','07.12.2026','Maya Sen',NULL)");
                 sql.execute("UPDATE DaywiseTask SET MANAGER_NAME='Gia Gupta' WHERE SR_NO IN (206,212)");
                 sql.execute("UPDATE DaywiseTask SET MANAGER_NAME='Alex Rao' WHERE SR_NO=211");
+                sql.execute("INSERT INTO DaywiseTask (SR_NO,STATUS,CUSTOMERNAME,MODULE_NAME,TEAM_LEADER,DEVELOPER_NAME,MANAGER_NAME,START_DATE,END_DATE,"
+                    + " ASSIGNBY,updateDate_Status,updateEnd_Date,updateDates_Reason) VALUES"
+                    + " (193,'Pending','Harbor Clinic','Device readiness','Leah Thomas','Mira Desai','Raj Nair','18.11.2026','21.11.2026','Raj Nair',NULL,NULL,NULL),"
+                    + " (194,'Pending','Harbor Clinic','Access validation','Leah Thomas','Mira Desai','Raj Nair','23.11.2026','25.11.2026','Raj Nair',NULL,NULL,NULL),"
+                    + " (195,'Pending','Harbor Clinic','Network cutover','Leah Thomas','Mira Desai','Raj Nair','25.11.2026','29.11.2026','Raj Nair','Pending for approval','30.11.2026','JSP due date request'),"
+                    + " (196,'Pending','Harbor Clinic','Failed history fixture','Leah Thomas','Mira Desai','Raj Nair','23.11.2026','25.11.2026','Raj Nair','Pending for approval','30.11.2026','Rollback test')");
+                sql.execute("INSERT INTO scm_mobile_task_access (LOGIN_ID,COMPANY_CODE,TASK_ID)"
+                    + " SELECT LOGINID,'QA-A',SR_NO FROM LOGINMASTER CROSS JOIN DaywiseTask WHERE LOGINID IN (9,10,11) AND SR_NO BETWEEN 193 AND 196");
                 sql.execute("INSERT INTO scm_mobile_task_access VALUES (1,'QA-A',206), (1,'QA-A',207), (1,'QA-A',208), (1,'QA-A',209),"
                     + " (8,'QA-A',210), (8,'QA-A',211), (1,'QA-A',211), (1,'QA-A',212), (8,'QA-A',206), (8,'QA-A',212)");
-                sql.execute("CREATE TABLE ReviseDateHistory (SR_NO INT PRIMARY KEY, TASK_ID VARCHAR(120), START_DATE VARCHAR(120), REVISE_START_DATE VARCHAR(120), END_DATE VARCHAR(120), REVISE_END_DATE VARCHAR(120), APPROVED_DATE VARCHAR(120), APPROVED_BY VARCHAR(128), REVISE_REASON VARCHAR(255), CHECK (TASK_ID <> '211'))");
+                sql.execute("CREATE TABLE ReviseDateHistory (SR_NO INT PRIMARY KEY, TASK_ID VARCHAR(120), START_DATE VARCHAR(120), REVISE_START_DATE VARCHAR(120), END_DATE VARCHAR(120), REVISE_END_DATE VARCHAR(120), APPROVED_DATE VARCHAR(120), APPROVED_BY VARCHAR(128), REVISE_REASON VARCHAR(255), CHECK (TASK_ID NOT IN ('196','211')))");
                 sql.execute("INSERT INTO scm_mobile_project_task VALUES"
                     + " (44,'QA-A',201), (44,'QA-A',202), (44,'QA-A',203), (44,'QA-A',205),"
                     + " (44,'QA-A',206), (44,'QA-B',207), (51,'QA-B',204), (52,'QA-A',201), (100,'QA-A',210)");

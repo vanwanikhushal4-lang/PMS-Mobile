@@ -34,6 +34,7 @@ public class AuthController {
         "/projects/list", "/projects/detail", "/projects/records", "/projects/tasks", "/projects/favorite",
         "/tasks/assigned-by-me", "/tasks/assigned-to-me", "/tasks/completed", "/tasks/work-log", "/tasks/progress", "/tasks/complete",
         "/tasks/dates/list", "/tasks/dates/detail", "/tasks/dates/request", "/tasks/dates/approve",
+        "/tasks/dates/request-batch", "/tasks/dates/approve-batch",
         "/tasks/assignments/list", "/tasks/assignments/project-options", "/tasks/assignments/options",
         "/tasks/assignments/create", "/tasks/assignments/reassign", "/tasks/assignments/reassign-bulk",
         "/tasks/assignments/contexts", "/tasks/assignments/standalone-options",
@@ -61,8 +62,10 @@ public class AuthController {
         String authorization = request.getHeader("Authorization");
         String bearer = authorization != null && authorization.startsWith("Bearer ") && authorization.length() == 50 ? authorization.substring(7) : null;
         try {
-            JSONObject data = withBody ? read(request) : new JSONObject();
-            AuthService.Reply reply = auth.dispatch(path.substring(base.length()), data, bearer, request.getRemoteAddr());
+            String action = path.substring(base.length());
+            int limit = "tasks/dates/request-batch".equals(action) ? MAX_BODY * 5 : MAX_BODY;
+            JSONObject data = withBody ? read(request, limit) : new JSONObject();
+            AuthService.Reply reply = auth.dispatch(action, data, bearer, request.getRemoteAddr());
             write(response, reply.status, reply.body);
         } catch (BodyTooLarge e) { error(response, 413, "account-unavailable"); }
         catch (JSONException e) { error(response, 400, "account-unavailable"); }
@@ -73,13 +76,13 @@ public class AuthController {
         }
     }
 
-    private JSONObject read(HttpServletRequest request) throws IOException, BodyTooLarge {
-        if (request.getContentLengthLong() > MAX_BODY) throw new BodyTooLarge();
+    private JSONObject read(HttpServletRequest request, int limit) throws IOException, BodyTooLarge {
+        if (request.getContentLengthLong() > limit) throw new BodyTooLarge();
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         byte[] chunk = new byte[1024];
         ServletInputStream stream = request.getInputStream();
         for (int n; (n = stream.read(chunk)) != -1;) {
-            if (bytes.size() + n > MAX_BODY) throw new BodyTooLarge();
+            if (bytes.size() + n > limit) throw new BodyTooLarge();
             bytes.write(chunk, 0, n);
         }
         return new JSONObject(new String(bytes.toByteArray(), StandardCharsets.UTF_8));

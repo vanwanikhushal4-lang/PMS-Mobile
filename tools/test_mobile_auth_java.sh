@@ -43,12 +43,17 @@ for dep in hibernate-core-5.1.5.Final hibernate-commons-annotations-5.0.1.Final 
 done
 cp -R "$base/webapps/scm-auth-qa" "$base/webapps/scm-auth-strict"
 cp -R "$base/webapps/scm-auth-qa" "$base/webapps/scm-auth-disabled"
+# Keep the multi-account date scenario's sign-ins independent of the auth suite's IP limit.
+if [[ ${SCM_AUTH_QA_SERVE:-0} != 1 ]]; then
+ cp -R "$base/webapps/scm-auth-qa" "$base/webapps/scm-auth-dates-qa"
+fi
 SCM_MOBILE_AUTH_KEY=$(openssl rand -base64 32) SCM_MOBILE_AUTH_JDBC_URL=jdbc:mysql://127.0.0.1:1/unused_stage_schema \
  SCM_MOBILE_AUTH_JDBC_USER=unused_stage_reader SCM_MOBILE_AUTH_JDBC_PASSWORD=not-used-by-the-loopback-test \
  CATALINA_HOME="$tomcat" CATALINA_BASE="$base" CATALINA_OPTS="--add-opens=java.base/java.lang=ALL-UNNAMED -Dscm.qa.inbox=$base/inbox.tsv" \
  "$tomcat/bin/catalina.sh" run > "$base/tomcat.log" 2>&1 &
 pid=$!
 qa="http://127.0.0.1:$port/scm-auth-qa/mobile/v1/auth/"
+dates="http://127.0.0.1:$port/scm-auth-dates-qa/mobile/v1/auth/"
 strict="http://127.0.0.1:$port/scm-auth-strict/mobile/v1/auth/"
 disabled="http://127.0.0.1:$port/scm-auth-disabled/mobile/v1/auth/"
 for ((i=0; i<50; i++)); do
@@ -62,7 +67,7 @@ if [[ ${SCM_AUTH_QA_SERVE:-0} == 1 ]]; then
  wait "$pid"
 else
  java --add-opens=java.base/java.lang=ALL-UNNAMED -cp "$war/classes:$war/lib/*:$tomcat/lib/servlet-api.jar" com.velox.itsm.mobileauth.qa.ExpiryCheck "$base/expiry-inbox.tsv"
- SCM_JAVA_QA_ENDPOINT="$qa" SCM_JAVA_STRICT_ENDPOINT="$strict" SCM_JAVA_DISABLED_ENDPOINT="$disabled" SCM_JAVA_QA_INBOX="$base/inbox.tsv" \
+ SCM_JAVA_QA_ENDPOINT="$qa" SCM_JAVA_DATE_BATCH_ENDPOINT="$dates" SCM_JAVA_STRICT_ENDPOINT="$strict" SCM_JAVA_DISABLED_ENDPOINT="$disabled" SCM_JAVA_QA_INBOX="$base/inbox.tsv" \
   node --test "$module/src/test/auth-http.test.mjs"
  if rg -q 'Stage-only-password-28|Synthetic-AD-only-22|Replacement-mobile-pass|Replacement-phone-pass' "$base/tomcat.log"; then
   echo 'A synthetic secret appeared in Tomcat output' >&2; exit 1

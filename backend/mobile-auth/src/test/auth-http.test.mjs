@@ -5,10 +5,11 @@ import { test } from 'node:test';
 import { createAuthClient, resolveAuthConfig } from '../../../../mobile/src/scm/auth-api.ts';
 
 const base = process.env.SCM_JAVA_QA_ENDPOINT;
+const datesBase = process.env.SCM_JAVA_DATE_BATCH_ENDPOINT;
 const strict = process.env.SCM_JAVA_STRICT_ENDPOINT;
 const disabled = process.env.SCM_JAVA_DISABLED_ENDPOINT;
 const inbox = process.env.SCM_JAVA_QA_INBOX;
-if (!base || !strict || !disabled || !inbox) throw new Error('Run tools/test_mobile_auth_java.sh to launch the private staging service');
+if (!base || !datesBase || !strict || !disabled || !inbox) throw new Error('Run tools/test_mobile_auth_java.sh to launch the private staging service');
 const client = createAuthClient(resolveAuthConfig(base, true));
 const factoryPassword = 'Stage-only-password-28';
 const credentials = (username, companyCode = 'QA-A', password = factoryPassword) => ({ username, companyCode, password });
@@ -420,6 +421,77 @@ await test('profile, projects, tasks and work logs enforce the verified account 
   await assert.rejects(() => client.profile(a.grant), { code: 'expired' });
   await assert.rejects(() => client.projects(a.grant, {}), { code: 'expired' });
   await assert.rejects(() => client.assignedTasks(a.grant), { code: 'expired' });
+});
+
+await test('team schedule proposals and approvals apply each batch atomically', async () => {
+  const client = createAuthClient(resolveAuthConfig(datesBase, true));
+  const lead = await client.signIn(credentials('schedule-lead'));
+  const reviewer = await client.signIn(credentials('schedule-manager'));
+  const assignee = await client.signIn(credentials('schedule-assignee'));
+  assert.equal(lead.kind, 'authenticated');
+  assert.equal(reviewer.kind, 'authenticated');
+  assert.equal(assignee.kind, 'authenticated');
+
+  const queue = await client.dateQueue(lead.grant, 'team');
+  assert.deepEqual(queue.items.map(({ id }) => id), [194, 193]);
+  const [first, second] = await Promise.all([client.taskDates(lead.grant, 193), client.taskDates(lead.grant, 194)]);
+  assert.match(first.scheduleRevision, /^[A-Za-z0-9_-]{43}$/);
+  assert.match(second.scheduleRevision, /^[A-Za-z0-9_-]{43}$/);
+  const proposals = [
+    { id: 193, start: '19.11.2026', due: '23.11.2026', reason: 'Pilot readiness & sign-off', revision: first.scheduleRevision },
+    { id: 194, start: '23.11.2026', due: '27.11.2026', reason: 'More time for access validation', revision: second.scheduleRevision },
+  ];
+  await assert.rejects(() => client.requestTaskDatesBatch(assignee.grant, proposals), { code: 'not-found', taskId: 193 });
+  await assert.rejects(() => client.requestTaskDatesBatch(lead.grant, [proposals[0], { ...proposals[1], due: '21.11.2026' }]),
+    { code: 'date-range', taskId: 194 });
+  await assert.rejects(() => client.requestTaskDatesBatch(lead.grant, [proposals[0], { ...proposals[1], reason: '<'.repeat(255) }]),
+    { code: 'date-reason-length', taskId: 194 });
+  await assert.rejects(() => client.requestTaskDatesBatch(lead.grant, [proposals[0], { ...proposals[1], revision: 'b'.repeat(43) }]),
+    { code: 'date-change-conflict', taskId: 194 });
+  assert.equal((await client.taskDates(lead.grant, 193)).revision, null);
+  assert.equal((await client.taskDates(lead.grant, 194)).revision, null);
+  await client.requestTaskDatesBatch(lead.grant, [...proposals].reverse());
+  assert.deepEqual((await client.dateQueue(lead.grant, 'team')).items, []);
+  assert.deepEqual((await client.dateQueue(lead.grant, 'mine')).items.map(({ id, dateApproval }) => [id, dateApproval]),
+    [[194, 'Pending for approval'], [193, 'Pending for approval']]);
+  assert.deepEqual((await client.dateQueue(reviewer.grant, 'mine')).items, []);
+
+  const pending = await client.dateQueue(reviewer.grant, 'review');
+  const items = pending.items;
+  assert.deepEqual(items.map(({ id }) => id), [196, 195, 194, 193]);
+  const approval = (taskId) => {
+    const task = items.find(({ id }) => id === taskId);
+    assert.ok(task.dateReview.canApprove);
+    return { id: task.id, revision: task.dateReview.revision };
+  };
+  const pendingFirst = items.find(({ id }) => id === 193);
+  assert.equal(pendingFirst.start, '18.11.2026');
+  assert.deepEqual(pendingFirst.dateReview, {
+    start: '19.11.2026', due: '23.11.2026', reason: 'Pilot readiness & sign-off', revision: approval(193).revision, canApprove: true,
+  });
+  assert.equal(approval(193).revision, (await client.taskDates(reviewer.grant, 193)).revision);
+  assert.equal(items.find(({ id }) => id === 195).dateReview.start, '25.11.2026');
+  await assert.rejects(() => client.approveTaskDatesBatch(lead.grant, [approval(193), approval(195)]), { code: 'not-found', taskId: 193 });
+  await assert.rejects(() => client.approveTaskDatesBatch(reviewer.grant, [approval(193), { ...approval(194), revision: 'b'.repeat(43) }]),
+    { code: 'date-change-conflict', taskId: 194 });
+  await assert.rejects(() => client.approveTaskDatesBatch(reviewer.grant, [approval(193), approval(196)]), { code: 'unavailable' });
+  assert.equal((await client.taskDates(reviewer.grant, 193)).revision, approval(193).revision);
+  assert.deepEqual((await client.taskDates(reviewer.grant, 193)).history, []);
+  assert.deepEqual((await client.taskDates(reviewer.grant, 196)).history, []);
+  await client.approveTaskDatesBatch(reviewer.grant, [approval(194), approval(195), approval(193)]);
+  assert.deepEqual((await client.dateQueue(reviewer.grant, 'review')).items.map(({ id }) => id), [196]);
+  assert.deepEqual((await client.dateQueue(lead.grant, 'mine')).items.map(({ id, dateApproval }) => [id, dateApproval]),
+    [[194, 'Date Approved'], [193, 'Date Approved']]);
+  const assigned = await client.myTasks(assignee.grant);
+  assert.deepEqual(assigned.items.map(({ id, start, due }) => [id, start, due]), [
+    [195, '25.11.2026', '30.11.2026'], [194, '23.11.2026', '27.11.2026'], [193, '19.11.2026', '23.11.2026'],
+  ]);
+  for (const id of [193, 194, 195]) {
+    const dates = await client.taskDates(assignee.grant, id);
+    assert.equal(dates.approval, 'Date Approved');
+    assert.deepEqual(dates.history.map(({ by, revisedStart, revisedDue }) => [by, revisedStart, revisedDue]),
+      [['Raj Nair', dates.start, dates.due]]);
+  }
 });
 
 await test('authenticator enrollment generates a usable secret and prevents reusing a time slot', async () => {

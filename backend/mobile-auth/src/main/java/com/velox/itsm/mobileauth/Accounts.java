@@ -6,6 +6,7 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
 import org.hibernate.SessionFactory;
@@ -159,6 +160,20 @@ public final class Accounts {
     TaskDates.Result approveDates(Account account, int taskId, String revision, LocalDateTime now) throws SQLException {
         try (Connection db = source.getConnection()) {
             return TaskDates.approve(db, legacySessions.get(), account, taskId, revision, now);
+        } catch (RuntimeException failure) {
+            throw new SQLException("SCM date approval is unavailable", failure);
+        }
+    }
+
+    TaskDates.Rejection requestDatesBatch(Account account, Map<Integer, TaskDates.Proposal> items, LocalDateTime now) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskDates.requestBatch(db, account, items, now);
+        }
+    }
+
+    TaskDates.Rejection approveDatesBatch(Account account, Map<Integer, String> items, LocalDateTime now) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return TaskDates.approveBatch(db, legacySessions.get(), account, items, now);
         } catch (RuntimeException failure) {
             throw new SQLException("SCM date approval is unavailable", failure);
         }
