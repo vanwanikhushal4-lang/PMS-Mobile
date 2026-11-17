@@ -76,6 +76,27 @@ export function TextAction({ label, onPress, disabled = false, testID }: { label
   </Pressable>;
 }
 
+export function SearchField({ label, placeholder, value, onChange, onSubmit, onClear, testID }: {
+  label: string; placeholder: string; value: string; onChange: (value: string) => void;
+  onSubmit: () => void; onClear?: () => void; testID: string;
+}) {
+  return <View style={styles.inputFrame}>
+    <View style={styles.searchIcon}><Icon name="search" /></View>
+    <TextInput style={[styles.input, styles.searchInput]} accessibilityLabel={label} placeholder={placeholder}
+      placeholderTextColor={color.subtle} selectionColor={color.blue} maxLength={120} testID={testID}
+      autoCapitalize="none" autoCorrect={false} value={value} onChangeText={onChange}
+      returnKeyType="search" onSubmitEditing={onSubmit} />
+    {onClear ? <Pressable accessibilityRole="button" accessibilityLabel="Clear search" onPress={onClear}
+      style={({ pressed }) => [styles.searchAction, pressed && styles.dim]}>
+      <Text style={styles.clear}>Clear</Text>
+    </Pressable> : null}
+    <Pressable accessibilityRole="button" accessibilityLabel={label} onPress={onSubmit}
+      style={({ pressed }) => [styles.searchAction, styles.submitSearch, pressed && styles.dim]}>
+      <Text style={styles.textAction}>Search</Text>
+    </Pressable>
+  </View>;
+}
+
 export function FormMessage({ message }: { message: string }) {
   const reduced = useReducedMotion();
   const [arrival] = useState(() => new Animated.Value(reduced ? 1 : 0));
@@ -97,6 +118,11 @@ const styles = StyleSheet.create({
   inputFrame: { minHeight: 52, flexDirection: 'row', alignItems: 'stretch', borderRadius: 8, borderWidth: 1, borderColor: color.edge, backgroundColor: color.panel },
   focus: { ...StyleSheet.absoluteFill, borderRadius: 8, borderWidth: 1, borderColor: color.blue },
   input: { flex: 1, minHeight: 48, color: color.text, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16 },
+  searchInput: { minWidth: 0, paddingStart: 2, paddingEnd: 6 },
+  searchIcon: { width: 37, justifyContent: 'center', alignItems: 'center' },
+  searchAction: { minWidth: 44, paddingHorizontal: 9, justifyContent: 'center', alignItems: 'center' },
+  submitSearch: { borderStartWidth: 1, borderColor: color.edge, paddingHorizontal: 12 },
+  clear: { color: color.muted, fontSize: 13 },
   iconButton: { width: 48, alignItems: 'center', justifyContent: 'center' }, dim: { opacity: 0.65 },
   textButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: 'transparent', borderRadius: 8 },
   focused: { borderColor: color.blue },

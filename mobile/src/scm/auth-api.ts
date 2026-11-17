@@ -73,7 +73,7 @@ type Requester = (url: string, init: RequestInit) => Promise<Pick<Response, 'ok'
 export function createAuthClient(config: AuthConfig, send: Requester = fetch, timeoutMs = 9000) {
   async function request(path: string, body: object | undefined, signal?: AbortSignal, token?: string) {
     const url = new URL(path, config.url);
-    const missingReason = path === 'projects/detail' || path === 'projects/records' ? 'project-not-found'
+    const missingReason = ['projects/detail', 'projects/records', 'projects/tasks', 'projects/favorite'].includes(path) ? 'project-not-found'
       : path === 'tasks/work-log' ? 'task-not-found' : null;
     const abort = new AbortController();
     const cancel = () => abort.abort();
@@ -128,9 +128,9 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       if (!data) throw new AuthError('bad-response');
       return data;
     },
-    projects: async (grant: Grant, filter: { query?: string; before?: number }, signal?: AbortSignal) => {
+    projects: async (grant: Grant, filter: { query?: string; before?: number; saved?: boolean }, signal?: AbortSignal) => {
       const data = decodeProjects(await request('projects/list', filter, signal, grant.sessionToken));
-      if (!data) throw new AuthError('bad-response');
+      if (!data || (filter.saved && data.items.some((project) => !project.favorite))) throw new AuthError('bad-response');
       return data;
     },
     project: async (grant: Grant, id: number, signal?: AbortSignal) => {
@@ -142,6 +142,17 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       const data = decodeProjectRecords(await request('projects/records', { id }, signal, grant.sessionToken));
       if (!data || data.projectId !== id) throw new AuthError('bad-response');
       return data;
+    },
+    projectTasks: async (grant: Grant, id: number, { query, before }: { query?: string; before?: number }, signal?: AbortSignal) => {
+      const response = await request('projects/tasks', { id, query, before }, signal, grant.sessionToken);
+      const data = decodeAssignedTasks(response);
+      if (!data || jsonObject(response).projectId !== id || (before !== undefined
+        && data.items.some((task) => task.id >= before))) throw new AuthError('bad-response');
+      return data;
+    },
+    setProjectFavorite: async (grant: Grant, id: number, favorite: boolean, signal?: AbortSignal) => {
+      const response = jsonObject(await request('projects/favorite', { id, favorite }, signal, grant.sessionToken));
+      if (response.kind !== 'project-favorite' || response.projectId !== id || response.favorite !== favorite) throw new AuthError('bad-response');
     },
     assignedTasks: async (grant: Grant, before?: number, signal?: AbortSignal) => {
       const data = decodeAssignedTasks(await request('tasks/assigned-by-me', { before }, signal, grant.sessionToken));

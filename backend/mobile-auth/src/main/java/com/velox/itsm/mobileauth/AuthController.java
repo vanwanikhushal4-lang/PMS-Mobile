@@ -31,7 +31,8 @@ public class AuthController {
     protected AuthController(AuthService auth, boolean loopbackQa) { this.auth = auth; this.loopbackQa = loopbackQa; }
 
     @RequestMapping(value = {"/sign-in", "/challenge/verify", "/challenge/resend", "/sign-out", "/recovery/start", "/recovery/verify", "/recovery/complete",
-        "/projects/list", "/projects/detail", "/projects/records", "/tasks/assigned-by-me", "/tasks/assigned-to-me", "/tasks/work-log"}, method = RequestMethod.POST)
+        "/projects/list", "/projects/detail", "/projects/records", "/projects/tasks", "/projects/favorite",
+        "/tasks/assigned-by-me", "/tasks/assigned-to-me", "/tasks/work-log"}, method = RequestMethod.POST)
     public void post(HttpServletRequest request, HttpServletResponse response) throws IOException { respond(request, response, true); }
 
     @RequestMapping(value = {"/session", "/workspace", "/profile"}, method = RequestMethod.GET)

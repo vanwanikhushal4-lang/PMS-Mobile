@@ -4,6 +4,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -31,21 +32,57 @@ final class AssignedTasks {
         try (PreparedStatement query = db.prepareStatement(sql)) {
             bind(query, account);
             if (before != 0) query.setInt(4, before);
-            try (ResultSet rows = query.executeQuery()) {
-                JSONArray items = new JSONArray();
-                int last = 0;
-                while (items.length() < PAGE_SIZE && rows.next()) {
-                    last = rows.getInt("SR_NO");
-                    items.put(new JSONObject().put("id", last)
-                        .put("module", label(rows, "MODULE_NAME")).put("status", label(rows, "STATUS"))
-                        .put("customer", label(rows, "CUSTOMERNAME")).put("suite", label(rows, "PRODUCTSUIT"))
-                        .put("tool", label(rows, "PRODUCTTOOL")).put("description", label(rows, "DESCRIPTION"))
-                        .put("lead", label(rows, "TEAM_LEADER")).put("developer", label(rows, "DEVELOPER_NAME"))
-                        .put("assigner", label(rows, "ASSIGNBY")).put("start", label(rows, "START_DATE")).put("due", label(rows, "END_DATE")));
-                }
-                Object next = items.length() == PAGE_SIZE && rows.next() ? last : JSONObject.NULL;
-                return new JSONObject().put("kind", "assigned-tasks").put("items", items).put("next", next);
+            return page(query);
+        }
+    }
+
+    static JSONObject projectPage(Connection db, Accounts.Account account, JSONObject input) throws SQLException {
+        int id = input.getInt("id");
+        if (Projects.detail(db, account, id) == null) return null;
+        String term = input.optString("query").trim().toLowerCase(Locale.ROOT);
+        boolean hasFilter = !term.isEmpty();
+        boolean hasCursor = input.has("before");
+        String sql = TASK_FIELDS + " FROM scm_mobile_project_access p"
+            + " JOIN ProjectData project ON project.SR_NO=p.PROJECT_ID"
+            + " JOIN scm_mobile_project_task l ON l.PROJECT_ID=p.PROJECT_ID AND l.COMPANY_CODE=p.COMPANY_CODE"
+            + " JOIN scm_mobile_task_access a ON a.TASK_ID=l.TASK_ID AND a.COMPANY_CODE=p.COMPANY_CODE AND a.LOGIN_ID=p.LOGIN_ID"
+            + " JOIN DaywiseTask t ON t.SR_NO=a.TASK_ID"
+            + " WHERE p.LOGIN_ID=? AND p.COMPANY_CODE=? AND p.PROJECT_ID=? AND (t.DEVELOPER_NAME=? OR t.ASSIGNBY=?)"
+            + (hasCursor ? " AND t.SR_NO<?" : "")
+            + (hasFilter ? " AND (LOWER(t.MODULE_NAME) LIKE ? ESCAPE '!' OR LOWER(t.DESCRIPTION) LIKE ? ESCAPE '!'"
+                + " OR LOWER(t.DEVELOPER_NAME) LIKE ? ESCAPE '!' OR LOWER(t.STATUS) LIKE ? ESCAPE '!')" : "")
+            + " ORDER BY t.SR_NO DESC LIMIT " + (PAGE_SIZE + 1);
+        try (PreparedStatement query = db.prepareStatement(sql)) {
+            query.setInt(1, account.id);
+            query.setString(2, account.companyCode);
+            query.setInt(3, id);
+            query.setString(4, account.fullname);
+            query.setString(5, account.fullname);
+            int parameter = 6;
+            if (hasCursor) query.setInt(parameter++, input.getInt("before"));
+            if (hasFilter) {
+                String pattern = "%" + term.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+                for (int i = 0; i < 4; i++) query.setString(parameter++, pattern);
             }
+            return page(query).put("projectId", id);
+        }
+    }
+
+    private static JSONObject page(PreparedStatement query) throws SQLException {
+        try (ResultSet rows = query.executeQuery()) {
+            JSONArray items = new JSONArray();
+            int last = 0;
+            while (items.length() < PAGE_SIZE && rows.next()) {
+                last = rows.getInt("SR_NO");
+                items.put(new JSONObject().put("id", last)
+                    .put("module", label(rows, "MODULE_NAME")).put("status", label(rows, "STATUS"))
+                    .put("customer", label(rows, "CUSTOMERNAME")).put("suite", label(rows, "PRODUCTSUIT"))
+                    .put("tool", label(rows, "PRODUCTTOOL")).put("description", label(rows, "DESCRIPTION"))
+                    .put("lead", label(rows, "TEAM_LEADER")).put("developer", label(rows, "DEVELOPER_NAME"))
+                    .put("assigner", label(rows, "ASSIGNBY")).put("start", label(rows, "START_DATE")).put("due", label(rows, "END_DATE")));
+            }
+            Object next = items.length() == PAGE_SIZE && rows.next() ? last : JSONObject.NULL;
+            return new JSONObject().put("kind", "assigned-tasks").put("items", items).put("next", next);
         }
     }
 

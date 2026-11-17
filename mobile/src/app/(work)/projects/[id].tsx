@@ -1,16 +1,26 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { AuthError, type Grant } from '../../scm/auth-api';
-import { authClient } from '../../scm/auth-config';
-import { useProtectedRead } from '../../scm/protected-read';
-import { FormMessage, Phase, TextAction } from '../../ui/Access';
-import { BrandedTopBar } from '../../ui/Brand';
-import { DetailRecord, Screen, type } from '../../ui/Primitives';
-import { ProjectRecordList } from '../../ui/Projects';
-import { color } from '../../ui/theme';
+import { useCallback, useState } from 'react';
+import { I18nManager, StyleSheet, Text, View } from 'react-native';
+import { AuthError, type Grant } from '../../../scm/auth-api';
+import { authClient } from '../../../scm/auth-config';
+import { useProtectedRead } from '../../../scm/protected-read';
+import { useSession } from '../../../scm/session';
+import { FormMessage, Phase, TextAction } from '../../../ui/Access';
+import { BrandedTopBar } from '../../../ui/Brand';
+import { DetailRecord, Screen, type } from '../../../ui/Primitives';
+import { ProjectFavorite, ProjectRecordList } from '../../../ui/Projects';
+import { ProjectTasks, type TaskView } from '../../../ui/ProjectTasks';
+import { WorkspaceTabs } from '../../../ui/Workspace';
+import { color } from '../../../ui/theme';
+
+const views = ['List', 'Board', 'Timeline', 'Records'] as const;
+const taskViews: TaskView[] = ['list', 'board', 'timeline'];
 
 export default function ProjectDetailScreen() {
+  const { state } = useSession();
+  const canReadTasks = state.kind === 'active' && state.session.identity.capabilities.includes('tasks.assigned-by-me');
+  const [pane, setPane] = useState({ index: 0, shift: 0 });
+  const records = !canReadTasks || pane.index === 3;
   const { id } = useLocalSearchParams<{ id: string }>();
   const idNumber = typeof id === 'string' && /^[1-9]\d{0,9}$/.test(id) ? Number(id) : 0;
   const projectId = idNumber <= 2_147_483_647 ? idNumber : 0;
@@ -23,21 +33,30 @@ export default function ProjectDetailScreen() {
   const item = result.kind === 'ready' ? result.data : null;
   const missing = result.kind === 'error' && (result.code === 'not-found' || result.code === 'forbidden');
 
-  return <Screen>
+  return <Screen keyboard workspace>
     <BrandedTopBar>
-      <TextAction label="Back to projects" onPress={() => router.canGoBack() ? router.back() : router.replace('/projects')} />
+      <TextAction label="All projects" onPress={() => router.canGoBack() ? router.back() : router.replace('/projects')} />
     </BrandedTopBar>
     <View style={styles.content}>
       {item ? <Phase>
         <View style={styles.heading}>
-          {item.reference ? <Text style={type.eyebrow}>{item.reference}</Text> : null}
-          <Text accessibilityRole="header" style={type.title}>{item.name || 'Unnamed project'}</Text>
+          <View style={styles.referenceRow}>
+            {item.reference ? <Text style={type.eyebrow}>{item.reference}</Text> : <View />}
+            <ProjectFavorite key={item.id + ':' + item.favorite} id={item.id} saved={item.favorite} />
+          </View>
+          <Text accessibilityRole="header" style={styles.title}>{item.name || 'Unnamed project'}</Text>
           {item.customer ? <Text style={type.body}>{item.customer}</Text> : null}
         </View>
-        <DetailRecord rows={[
-          ['Product suite', item.suite], ['Product tool', item.tool], ['Function', item.function], ['Responsibility', item.responsibility],
-        ]} />
-        <ProjectRecordsPane id={item.id} />
+        {canReadTasks ? <WorkspaceTabs labels={views} index={pane.index} onSelect={(index) => setPane((current) => index === current.index ? current : {
+          index, shift: 18 * Math.sign(index - current.index) * (I18nManager.isRTL ? -1 : 1),
+        })} /> : null}
+        {canReadTasks ? <ProjectTasks key={item.id} id={item.id} view={records ? null : taskViews[pane.index]} shift={pane.shift} /> : null}
+        {records ? <Phase shift={pane.shift}>
+          <DetailRecord rows={[
+            ['Product suite', item.suite], ['Product tool', item.tool], ['Function', item.function], ['Responsibility', item.responsibility],
+          ]} />
+          <ProjectRecordsPane id={item.id} />
+        </Phase> : null}
       </Phase> : <Text accessibilityRole="header" style={type.title}>Project</Text>}
       {result.kind === 'loading' ? <Text accessibilityLiveRegion="polite" style={type.caption}>Loading project…</Text> : null}
       {result.kind === 'error' ? <>
@@ -69,6 +88,8 @@ function ProjectRecordsPane({ id }: { id: number }) {
 const styles = StyleSheet.create({
   content: { gap: 20, marginTop: 12 },
   heading: { gap: 8 },
+  referenceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', columnGap: 12 },
+  title: { color: color.text, fontSize: 30, lineHeight: 36, letterSpacing: -0.6, fontWeight: '700' },
   section: { gap: 12 },
   sectionTitle: { fontSize: 20, fontWeight: '600', color: color.text },
 });

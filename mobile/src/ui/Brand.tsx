@@ -1,7 +1,8 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState, type PropsWithChildren } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
-import { useReducedMotion } from './motion';
+import { Animated, StyleSheet, Text, View } from 'react-native';
+import { useArrival, useReducedMotion } from './motion';
+import { color } from './theme';
 
 const mark = require('../../assets/velox-mark.png');
 
@@ -48,6 +49,17 @@ export function BrandedTopBar({ children }: PropsWithChildren) {
   </View>;
 }
 
+export function WorkspaceHeading({ title, context }: { title: string; context?: string }) {
+  const entrance = useArrival(0, 9);
+  return <Animated.View style={[styles.heading, entrance]}>
+    <View style={styles.headingCopy}>
+      {context ? <Text style={styles.context}>{context}</Text> : null}
+      <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+    </View>
+    <VeloxMark />
+  </Animated.View>;
+}
+
 const styles = StyleSheet.create({
   plate: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F5F7FA' },
   largePlate: { width: 44, height: 44, borderRadius: 12 },
@@ -55,4 +67,8 @@ const styles = StyleSheet.create({
   largeMark: { width: 29, height: 29 },
   bar: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   navigation: { flexShrink: 1 },
+  heading: { minHeight: 72, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, paddingTop: 5 },
+  headingCopy: { flex: 1, gap: 5 },
+  context: { color: color.blue, fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  title: { color: color.text, fontSize: 32, lineHeight: 38, letterSpacing: -0.85, fontWeight: '700' },
 });

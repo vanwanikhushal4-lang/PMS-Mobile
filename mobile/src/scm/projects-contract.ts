@@ -7,6 +7,7 @@ export type Project = {
   suite: string;
   tool: string;
   reference: string;
+  favorite: boolean;
 };
 export type ProjectPage = { items: Project[]; next: number | null };
 export type Profile = { email: string; phone: string; location: string; site: string; department: string; subdepartment: string };
@@ -35,9 +36,9 @@ export function decodeProfile(value: unknown): Profile | null {
 function project(value: unknown): Project | null {
   const row = object(value);
   if (!row) return null;
-  const { id: number, name, customer, function: work, responsibility, suite, tool, reference } = row;
+  const { id: number, name, customer, function: work, responsibility, suite, tool, reference, favorite = false } = row;
   return id(number) && label(name) && label(customer) && label(work) && label(responsibility) && label(suite) && label(tool) && label(reference)
-    ? { id: number, name, customer, function: work, responsibility, suite, tool, reference } : null;
+    && typeof favorite === 'boolean' ? { id: number, name, customer, function: work, responsibility, suite, tool, reference, favorite } : null;
 }
 
 export function decodeProject(value: unknown): Project | null {

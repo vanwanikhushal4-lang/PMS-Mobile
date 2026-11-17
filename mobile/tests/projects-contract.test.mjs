@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { decodeProjectRecords, decodeProjects } from '../src/scm/projects-contract.ts';
 
-const item = (id) => ({ id, name: 'Project', customer: '', function: '', responsibility: '', suite: '', tool: '', reference: '' });
+const item = (id) => ({ id, name: 'Project', customer: '', function: '', responsibility: '', suite: '', tool: '', reference: '', favorite: false });
 
 test('project pages require a descending, unique list with a consistent cursor', () => {
   const items = Array.from({ length: 30 }, (_, index) => item(100 - index));

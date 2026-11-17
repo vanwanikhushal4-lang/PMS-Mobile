@@ -61,6 +61,8 @@ public final class Accounts {
             switch (action) {
                 case "projects/detail": return Projects.detail(db, account, input.getInt("id"));
                 case "projects/records": return Projects.records(db, account, input.getInt("id"));
+                case "projects/tasks": return AssignedTasks.projectPage(db, account, input);
+                case "projects/favorite": return Projects.favorite(db, account, input.getInt("id"), input.getBoolean("favorite"));
                 default: return Projects.page(db, account, input);
             }
         }

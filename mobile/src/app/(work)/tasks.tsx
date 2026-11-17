@@ -1,18 +1,19 @@
-import { router } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { AuthError, type Grant } from '../scm/auth-api';
-import { authClient } from '../scm/auth-config';
-import { useProtectedRead } from '../scm/protected-read';
-import { FormMessage, Phase, TextAction } from '../ui/Access';
-import { BrandedTopBar } from '../ui/Brand';
-import { Action, DetailRecord, Screen, type } from '../ui/Primitives';
-import { WorkspaceTabs } from '../ui/Workspace';
-import { color } from '../ui/theme';
+import { AuthError, type Grant } from '../../scm/auth-api';
+import { authClient } from '../../scm/auth-config';
+import { useProtectedRead } from '../../scm/protected-read';
+import { FormMessage, Phase, TextAction } from '../../ui/Access';
+import { WorkspaceHeading } from '../../ui/Brand';
+import { useSession } from '../../scm/session';
+import { Action, DetailRecord, Screen, type } from '../../ui/Primitives';
+import { WorkspaceTabs } from '../../ui/Workspace';
+import { color } from '../../ui/theme';
 
 const queues = ['Assigned to me', 'Assigned by me'] as const;
 
 export default function AssignedTasksScreen() {
+  const { state } = useSession();
   const [queue, setQueue] = useState(0);
   const incoming = queue === 0;
   const [cursors, setCursors] = useState<number[]>([]);
@@ -25,12 +26,9 @@ export default function AssignedTasksScreen() {
   const { result, reload } = useProtectedRead(read);
   const next = result.kind === 'ready' ? result.data.next : null;
 
-  return <Screen>
-    <BrandedTopBar>
-      <TextAction label="Back to workspace" onPress={() => router.canGoBack() ? router.back() : router.replace('/workspace')} />
-    </BrandedTopBar>
+  return <Screen workspace>
+    <WorkspaceHeading title="My work" context={state.kind === 'active' ? state.session.identity.companyName : undefined} />
     <View style={styles.content}>
-      <Text accessibilityRole="header" style={type.title}>Tasks</Text>
       <WorkspaceTabs labels={queues} index={queue} onSelect={(index) => {
         if (index !== queue) { setQueue(index); setCursors([]); setOpen(null); }
       }} />

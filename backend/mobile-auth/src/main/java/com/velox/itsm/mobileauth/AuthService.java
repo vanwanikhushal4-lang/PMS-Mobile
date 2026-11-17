@@ -47,7 +47,7 @@ public final class AuthService implements AutoCloseable {
         long now = clock.getAsLong();
         switch (action) {
             case "session": case "sign-out": case "workspace": case "profile":
-            case "projects/list": case "projects/detail": case "projects/records":
+            case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/work-log":
                 return session(action, input, bearer, now);
             default: break;
@@ -220,7 +220,7 @@ public final class AuthService implements AutoCloseable {
                 JSONObject profile = accounts.profile(account);
                 result = profile == null ? rejected(401, "expired") : reply(200, profile);
                 break;
-            case "projects/list": case "projects/detail": case "projects/records":
+            case "projects/list": case "projects/detail": case "projects/records": case "projects/tasks": case "projects/favorite":
                 result = projects(action, input, key, account, now);
                 break;
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/work-log":
@@ -233,9 +233,9 @@ public final class AuthService implements AutoCloseable {
     }
 
     private Reply projects(String action, JSONObject input, String key, Account account, long now) throws SQLException {
-        if (!account.projectAccess) return rejected(403, "forbidden");
+        if (!account.projectAccess || ("projects/tasks".equals(action) && !account.taskAccess)) return rejected(403, "forbidden");
         if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
-        if (!Projects.valid(input, !"projects/list".equals(action))) return rejected(400, "invalid-filter");
+        if (!Projects.valid(input, action)) return rejected(400, "invalid-filter");
         JSONObject projects = accounts.projects(account, input, action);
         return projects == null ? rejected(404, "project-not-found") : reply(200, projects);
     }

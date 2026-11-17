@@ -19,14 +19,7 @@ function Routes() {
       <Stack.Screen name="connection" />
       <Stack.Protected guard={state.kind === 'signed-out'}><Stack.Screen name="sign-in" /></Stack.Protected>
       <Stack.Protected guard={state.kind === 'active'}>
-        <Stack.Screen name="workspace" />
-        <Stack.Protected guard={state.kind === 'active' && state.session.identity.capabilities.includes('projects.read')}>
-          <Stack.Screen name="projects/index" />
-          <Stack.Screen name="projects/[id]" />
-        </Stack.Protected>
-        <Stack.Protected guard={state.kind === 'active' && state.session.identity.capabilities.includes('tasks.assigned-by-me')}>
-          <Stack.Screen name="tasks" />
-        </Stack.Protected>
+        <Stack.Screen name="(work)" />
       </Stack.Protected>
     </Stack>
   </>;

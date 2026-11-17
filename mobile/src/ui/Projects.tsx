@@ -1,6 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AuthError } from '../scm/auth-api';
+import { authClient } from '../scm/auth-config';
 import type { Project, ProjectRecordGroup, ProjectRecords } from '../scm/projects-contract';
+import { useSession } from '../scm/session';
+import { FormMessage } from './Access';
 import { Icon, type } from './Primitives';
 import { useReducedMotion } from './motion';
 import { color } from './theme';
@@ -35,17 +39,70 @@ export function ProjectRow({ item, index, onPress }: { item: Project; index: num
       { scale: reduced ? 1 : scale },
     ],
   }}>
-    <Pressable accessibilityRole="button" testID={`project-${item.id}`} onPress={onPress}
+    <Pressable accessibilityRole="button"
+      accessibilityLabel={[item.name || 'Unnamed project', item.reference, item.customer || item.tool, item.favorite ? 'Saved' : ''].filter(Boolean).join(', ')}
+      testID={`project-${item.id}`} onPress={onPress}
       onPressIn={() => press(0.982)} onPressOut={() => press(1)}
       style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
+      <View style={styles.projectIcon}><Icon name="projects" size={21} tint={color.blue} /></View>
       <View style={styles.copy}>
-        {item.reference ? <Text style={type.eyebrow}>{item.reference}</Text> : null}
         <Text style={styles.title}>{item.name || 'Unnamed project'}</Text>
-        {item.customer ? <Text style={type.caption}>{item.customer}</Text> : null}
+        {item.reference || item.customer || item.tool ? <Text style={type.caption}>{[item.reference, item.customer || item.tool].filter(Boolean).join(' · ')}</Text> : null}
       </View>
+      {item.favorite ? <Icon name="bookmark" tint={color.blue} filled /> : null}
       <Icon name="arrow" tint={color.blue} />
     </Pressable>
   </Animated.View>;
+}
+
+export function ProjectFavorite({ id, saved }: { id: number; saved: boolean }) {
+  const { state, expire } = useSession();
+  const reduced = useReducedMotion();
+  const [confirmed, setConfirmed] = useState(saved);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [scale] = useState(() => new Animated.Value(1));
+  const pending = useRef<AbortController | null>(null);
+  useEffect(() => () => { pending.current?.abort(); scale.stopAnimation(); }, [scale]);
+  useEffect(() => {
+    if (reduced) { scale.stopAnimation(); scale.setValue(1); }
+  }, [reduced, scale]);
+
+  async function toggle() {
+    if (!authClient || state.kind !== 'active' || pending.current) return;
+    const request = new AbortController();
+    pending.current = request;
+    setBusy(true);
+    setError('');
+    const next = !confirmed;
+    const { grant } = state;
+    try {
+      await authClient.setProjectFavorite(grant, id, next, request.signal);
+      if (request.signal.aborted) return;
+      setConfirmed(next);
+      if (!reduced) {
+        scale.setValue(0.82);
+        Animated.spring(scale, { toValue: 1, damping: 16, stiffness: 295, useNativeDriver: true }).start();
+      }
+    } catch (failure) {
+      if (request.signal.aborted) return;
+      if (failure instanceof AuthError && failure.code === 'expired') expire(grant.sessionToken);
+      else setError('Couldn’t update saved projects. Try again.');
+    } finally {
+      pending.current = null;
+      if (!request.signal.aborted) setBusy(false);
+    }
+  }
+
+  return <View style={styles.favorite}>
+    <Pressable accessibilityRole="button" accessibilityLabel={confirmed ? 'Remove saved project' : 'Save project'}
+      accessibilityState={{ selected: confirmed, busy, disabled: busy }} disabled={busy} onPress={() => void toggle()}
+      style={({ pressed }) => [styles.favoriteAction, pressed && styles.pressed]}>
+      <Animated.View style={{ transform: [{ scale }] }}><Icon name="bookmark" tint={color.blue} filled={confirmed} /></Animated.View>
+      <Text style={styles.favoriteLabel}>{confirmed ? 'Saved' : 'Save project'}</Text>
+    </Pressable>
+    {error ? <FormMessage message={error} /> : null}
+  </View>;
 }
 
 export function ProjectRecordList({ records }: { records: ProjectRecords }) {
@@ -73,8 +130,13 @@ const styles = StyleSheet.create({
   row: { minHeight: 64, flexDirection: 'row', gap: 16, alignItems: 'center', borderColor: color.edge, borderWidth: 1,
     borderRadius: 8, backgroundColor: color.panel, padding: 16 },
   pressed: { backgroundColor: color.raised },
+  projectIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', backgroundColor: '#23344C' },
   copy: { flex: 1, gap: 4 },
   title: { color: color.text, fontSize: 17, lineHeight: 24, fontWeight: '600' },
+  favorite: { gap: 6 },
+  favoriteAction: { minHeight: 44, alignSelf: 'flex-start', paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center',
+    gap: 8, borderWidth: 1, borderColor: color.edge, borderRadius: 8, backgroundColor: color.panel },
+  favoriteLabel: { color: color.blue, fontWeight: '600', fontSize: 13 },
   groups: { gap: 16 },
   group: { gap: 8 },
   register: { backgroundColor: color.panel, paddingHorizontal: 16, borderRadius: 8, borderColor: color.edge, borderWidth: 1 },

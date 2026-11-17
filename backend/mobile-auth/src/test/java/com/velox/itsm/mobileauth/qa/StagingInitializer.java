@@ -81,7 +81,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     incident.executeBatch();
                     history.executeBatch();
                 }
-                for (String resource : new String[]{"/var/schema.sql", "/var/schema-projects.sql", "/var/schema-tasks.sql"}) {
+                for (String resource : new String[]{"/var/schema.sql", "/var/schema-projects.sql", "/var/schema-tasks.sql", "/var/schema-project-workspace.sql"}) {
                     try (InputStream stream = QA.class.getResourceAsStream(resource); Scanner schema = new Scanner(stream, "UTF-8").useDelimiter("\\A")) {
                         for (String statement : schema.next().split(";")) if (!statement.trim().isEmpty()) sql.execute(statement);
                     }
@@ -127,6 +127,9 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " (208,'Completed','Riverside Works',NULL,NULL,NULL,'Closed task',NULL,'Alex Rao',NULL,NULL,'Maya Sen',NULL),"
                     + " (209,'Pending','Riverside Works',NULL,NULL,NULL,'Different developer',NULL,'Alex Kim',NULL,NULL,'Maya Sen',NULL)");
                 sql.execute("INSERT INTO scm_mobile_task_access VALUES (1,'QA-A',206), (1,'QA-A',207), (1,'QA-A',208), (1,'QA-A',209)");
+                sql.execute("INSERT INTO scm_mobile_project_task VALUES"
+                    + " (44,'QA-A',201), (44,'QA-A',202), (44,'QA-A',203), (44,'QA-A',205),"
+                    + " (44,'QA-A',206), (44,'QA-B',207), (51,'QA-B',204), (52,'QA-A',201)");
                 sql.execute("CREATE TABLE Update_Todays_Progress (SR_NO INT PRIMARY KEY, TASK_ID VARCHAR(120), DATE VARCHAR(120), TODAYS_PROGRESS VARCHAR(2000), STATUS VARCHAR(120), FULL_NAME VARCHAR(120), TASK_TYPE VARCHAR(120))");
                 sql.execute("INSERT INTO Update_Todays_Progress VALUES"
                     + " (301,'206','16.11.2026','Verified pilot accounts and recorded rollout exceptions.','In-Progress','Alex Rao','General'),"
