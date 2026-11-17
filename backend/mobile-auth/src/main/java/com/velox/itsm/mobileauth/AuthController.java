@@ -32,6 +32,7 @@ public class AuthController {
 
     @RequestMapping(value = {"/sign-in", "/challenge/verify", "/challenge/resend", "/sign-out", "/recovery/start", "/recovery/verify", "/recovery/complete",
         "/projects/list", "/projects/detail", "/projects/records", "/projects/records/detail", "/projects/tasks", "/projects/favorite",
+        "/projects/records/review-queue", "/projects/records/review",
         "/projects/create-options", "/projects/create",
         "/projects/publishing/tree", "/projects/publishing/orders", "/projects/publishing/order", "/projects/publishing/tasks",
         "/projects/attachments/list", "/projects/attachments/download",

@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import { useCallback } from 'react';
+import { useCallback, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { AuthError, type Grant } from '../../../../../../scm/auth-api';
 import { authClient } from '../../../../../../scm/auth-config';
@@ -9,6 +9,7 @@ import { FormMessage, Phase, TextAction } from '../../../../../../ui/Access';
 import { BrandedTopBar } from '../../../../../../ui/Brand';
 import { DetailRecord, Screen, type } from '../../../../../../ui/Primitives';
 import { ProjectAttachmentPanel } from '../../../../../../ui/ProjectAttachmentPanel';
+import { ProjectReviewActions } from '../../../../../../ui/ProjectReviewActions';
 import { color } from '../../../../../../ui/theme';
 
 function routeId(value: unknown) {
@@ -18,7 +19,7 @@ function routeId(value: unknown) {
 }
 
 export default function ProjectRecordScreen() {
-  const params = useLocalSearchParams<{ id: string; scope: string; recordId: string }>();
+  const params = useLocalSearchParams<{ id: string; scope: string; recordId: string; source?: string }>();
   const scope = isProjectRecordScope(params.scope) ? params.scope : null;
   const id = routeId(params.id);
   const recordId = routeId(params.recordId);
@@ -31,15 +32,21 @@ export default function ProjectRecordScreen() {
   const title = scope ? projectRecordTitles[scope] : 'Project record';
   const detail = result.kind === 'ready' ? result.data : null;
   const missing = result.kind === 'error' && (result.code === 'not-found' || result.code === 'forbidden');
+  const fromReview = params.source === 'review';
+  const recordKey = `${scope}-${id}-${recordId}`;
+  const [feedback, setFeedback] = useState<{ key: string; success: boolean; message: string } | null>(null);
+  const message = feedback?.key === recordKey ? feedback : null;
+  const visibleReview = !!detail?.review;
 
   function back() {
     if (router.canGoBack()) router.back();
+    else if (fromReview) router.replace('/projects/review');
     else if (id) router.replace({ pathname: '/projects/[id]', params: { id, view: 'records' } });
     else router.replace('/projects');
   }
 
-  return <Screen workspace>
-    <BrandedTopBar><TextAction label="Project records" onPress={back} /></BrandedTopBar>
+  return <Screen keyboard={visibleReview} workspace>
+    <BrandedTopBar><TextAction label={fromReview ? 'Document review' : 'Project records'} onPress={back} /></BrandedTopBar>
     <View style={styles.content}>
       <View style={styles.header}>
         {detail?.item.reference ? <Text style={type.eyebrow}>{title}</Text> : null}
@@ -52,6 +59,10 @@ export default function ProjectRecordScreen() {
         <FormMessage message={missing ? 'This record is unavailable to your account.' : 'Couldn’t load this record.'} />
         {missing ? null : <TextAction label="Try again" onPress={reload} />}
       </> : null}
+      {message ? <Phase>
+        {message.success ? <Text style={styles.success} accessibilityLiveRegion="polite">{message.message}</Text>
+          : <FormMessage message={message.message} />}
+      </Phase> : null}
       {scope && detail ? <Phase shift={14}>
         <View style={styles.sections}>
           {projectRecordSections[scope].map((section) => {
@@ -66,6 +77,8 @@ export default function ProjectRecordScreen() {
             <Text accessibilityRole="header" style={styles.sectionTitle}>Files</Text>
             <ProjectAttachmentPanel key={`${scope}-${id}-${recordId}`} target={{ scope, id, recordId }} />
           </View>
+          {detail.review ? <ProjectReviewActions key={recordKey + detail.review.revision} target={{ scope, id, recordId }}
+            review={detail.review} onRefresh={(result) => { setFeedback({ key: recordKey, ...result }); reload(); }} /> : null}
         </View>
       </Phase> : null}
     </View>
@@ -78,4 +91,5 @@ const styles = StyleSheet.create({
   sections: { gap: 24 },
   section: { gap: 8 },
   sectionTitle: { color: color.text, fontSize: 18, lineHeight: 24, fontWeight: '600' },
+  success: { color: color.success, fontSize: 16, fontWeight: '600' },
 });

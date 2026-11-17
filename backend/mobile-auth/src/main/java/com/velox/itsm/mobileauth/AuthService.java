@@ -56,6 +56,7 @@ public final class AuthService implements AutoCloseable {
         switch (action) {
             case "session": case "sign-out": case "workspace": case "profile":
             case "projects/list": case "projects/detail": case "projects/records": case "projects/records/detail":
+            case "projects/records/review-queue": case "projects/records/review":
             case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
             case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
@@ -239,6 +240,7 @@ public final class AuthService implements AutoCloseable {
                 result = profile == null ? rejected(401, "expired") : reply(200, profile);
                 break;
             case "projects/list": case "projects/detail": case "projects/records": case "projects/records/detail":
+            case "projects/records/review-queue": case "projects/records/review":
             case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
             case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
@@ -284,6 +286,15 @@ public final class AuthService implements AutoCloseable {
         if (!account.projectWorkspace() || ((creating || options) && !account.projectCreate)
                 || ("projects/tasks".equals(action) && !account.taskWorkspace())) return rejected(403, "forbidden");
         if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
+        if ("projects/records/review-queue".equals(action) || "projects/records/review".equals(action)) {
+            boolean queue = action.endsWith("-queue");
+            if (!(queue ? ProjectReview.validQueue(input) : ProjectReview.validDecision(input))) return rejected(400, "invalid-filter");
+            if (!ProjectReview.allowed(account, ProjectRecords.Kind.from(input.opt("scope")))) return rejected(403, "forbidden");
+            if (queue) return reply(200, accounts.projects(account, input, action));
+            JSONObject result = accounts.reviewProjectRecord(account, input, TaskProgress.localTime(now));
+            return result == null ? rejected(404, "project-not-found")
+                : reply("rejected".equals(result.getString("kind")) ? 409 : 200, result);
+        }
         if (creating) {
             if (!ProjectCreation.validDraft(input)) return rejected(400, "invalid-project-draft");
             JSONObject result = accounts.createProject(account, input);

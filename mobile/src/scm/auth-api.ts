@@ -1,8 +1,9 @@
 import { decodeAuthStep, type AuthStep } from './auth-contract.ts';
 import { decodeAttachments, type AttachmentTarget } from './attachments-contract.ts';
 import { decodeWorkspace } from './workspace-contract.ts';
-import { decodeCreatedProject, decodeProfile, decodeProject, decodeProjectCreateOptions, decodeProjectRecordDetail,
-  decodeProjectRecords, decodeProjects, type ProjectDraft, type ProjectRecordTarget } from './projects-contract.ts';
+import { decodeCreatedProject, decodeDocumentReviewQueue, decodeProfile, decodeProject, decodeProjectCreateOptions,
+  decodeProjectRecordDetail, decodeProjectRecords, decodeProjects, type DocumentReviewDecision, type DocumentReviewScope,
+  type ProjectDraft, type ProjectRecordTarget } from './projects-contract.ts';
 import { decodePublishTree, decodePurchaseOrder, decodePurchaseOrders, type PublishCustomer, type PublishPath } from './publishing-contract.ts';
 import { decodeAssignedTasks, decodeTaskAssignees, decodeTaskContexts, decodeTaskDates, decodeWorkLog,
   type DateApproval, type DateProposal, type DateQueue, type StandaloneTask, type TaskContext, type TaskDraft, type TaskTransfer } from './tasks-contract.ts';
@@ -36,7 +37,8 @@ export class AuthError extends Error {
   readonly code: 'transport' | 'bad-response' | 'expired' | 'unavailable' | 'forbidden' | 'not-found' | 'progress-already-logged' | 'task-closed'
     | 'date-range' | 'date-reason-length' | 'date-change-conflict' | 'date-no-reviewer'
     | 'invalid-task-draft' | 'task-weight-limit' | 'task-assignment-conflict' | 'candidate-unavailable'
-    | 'invalid-project-draft' | 'project-context-unavailable' | 'project-function-unavailable' | 'project-request-conflict' | 'project-duplicate';
+    | 'invalid-project-draft' | 'project-context-unavailable' | 'project-function-unavailable' | 'project-request-conflict' | 'project-duplicate'
+    | 'project-review-conflict';
   readonly taskId?: number;
   constructor(code: AuthError['code'], taskId?: number) { super(code); this.name = 'AuthError'; this.code = code; this.taskId = taskId; }
 }
@@ -98,7 +100,7 @@ function confirmedBatch(result: unknown, kind: string, items: readonly { id: num
 export function createAuthClient(config: AuthConfig, send: Requester = fetch, timeoutMs = 9000) {
   async function request(path: string, body: object | undefined, signal?: AbortSignal, token?: string) {
     const url = new URL(path, config.url);
-    const missingReason = ['projects/detail', 'projects/records', 'projects/records/detail', 'projects/tasks', 'projects/favorite',
+    const missingReason = ['projects/detail', 'projects/records', 'projects/records/detail', 'projects/records/review', 'projects/tasks', 'projects/favorite',
       'tasks/assignments/project-options', 'tasks/assignments/create'].includes(path) ? 'project-not-found'
       : ['tasks/work-log', 'tasks/progress', 'tasks/complete', 'tasks/dates/detail', 'tasks/dates/request', 'tasks/dates/approve',
         'tasks/dates/request-batch', 'tasks/dates/approve-batch',
@@ -131,6 +133,10 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       if (response.status === 429) return { kind: 'rejected', reason: 'rate-limited' };
       if (!response.headers.get('content-type')?.toLowerCase().startsWith('application/json')) throw new AuthError('bad-response');
       const data = await response.json().catch(() => { throw new AuthError('bad-response'); });
+      if (path === 'projects/records/review' && response.status === 409) {
+        const { kind, reason } = jsonObject(data);
+        if (kind === 'rejected' && reason === 'project-review-conflict') throw new AuthError(reason);
+      }
       if (path === 'projects/create' && (response.status === 400 || response.status === 409)) {
         const { kind, reason } = jsonObject(data);
         if (kind === 'rejected' && (reason === 'invalid-project-draft' || reason === 'project-context-unavailable'
@@ -203,6 +209,17 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
     projectRecordDetail: async (grant: Grant, target: ProjectRecordTarget, signal?: AbortSignal) => {
       const data = decodeProjectRecordDetail(await request('projects/records/detail', target, signal, grant.sessionToken), target);
       if (!data) throw new AuthError('bad-response');
+      return data;
+    },
+    documentReviewQueue: async (grant: Grant, scope: DocumentReviewScope, before?: number, signal?: AbortSignal) => {
+      const data = decodeDocumentReviewQueue(await request('projects/records/review-queue', { scope, before }, signal, grant.sessionToken), scope, before);
+      if (!data) throw new AuthError('bad-response');
+      return data;
+    },
+    reviewProjectRecord: async (grant: Grant, target: ProjectRecordTarget, decision: DocumentReviewDecision, signal?: AbortSignal) => {
+      const data = decodeProjectRecordDetail(await request('projects/records/review', { ...target, ...decision }, signal, grant.sessionToken), target);
+      const status = target.scope === 'requirement' ? 'RD Approved' : decision.decision === 'approve' ? 'UD Approved By MD' : 'UD Rejected By MD';
+      if (!data || data.review || data.item.status !== status) throw new AuthError('bad-response');
       return data;
     },
     projectTasks: async (grant: Grant, id: number, { query, before }: { query?: string; before?: number }, signal?: AbortSignal) => {

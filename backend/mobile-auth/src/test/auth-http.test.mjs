@@ -689,6 +689,74 @@ await test('Publish Project browses scoped progress and opens the exact purchase
   assert.equal((await download(other.grant, { ...kickoff, kind: 'kickoff-plan' })).status, 404);
 });
 
+await test('document decisions require the current revision, legacy review scope, and exact project and company', async () => {
+  const reviewClient = createAuthClient(resolveAuthConfig(datesBase, true));
+  const director = (await reviewClient.signIn(credentials('document-director'))).grant;
+  const projectHead = (await reviewClient.signIn(credentials('document-project-head'))).grant;
+  const limited = await reviewClient.signIn(credentials('document-limited'));
+  const other = (await reviewClient.signIn(credentials('document-other-company', 'QA-B'))).grant;
+  assert.ok(director && projectHead && limited.grant && other);
+
+  const understand = (recordId) => ({ scope: 'understanding', id: 47, recordId });
+  const requirement = { scope: 'requirement', id: 47, recordId: 64 };
+  const item = await reviewClient.projectRecordDetail(director, understand(72));
+  assert.match(item.review.revision, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(item.review.canReject, true);
+  const approval = { decision: 'approve', revision: item.review.revision };
+  const queue = await reviewClient.documentReviewQueue(director, 'understanding');
+  assert.deepEqual(queue.items.map(({ id, projectId, projectReference }) => [id, projectId, projectReference]),
+    [[74, 47, 'PM-1047'], [73, 47, 'PM-1047'], [72, 47, 'PM-1047']]);
+  assert.deepEqual((await reviewClient.documentReviewQueue(projectHead, 'understanding', 74)).items.map(({ id }) => id), [73, 72]);
+  assert.deepEqual((await reviewClient.documentReviewQueue(other, 'understanding')).items.map(({ id }) => id), [76]);
+  await assert.rejects(() => reviewClient.documentReviewQueue(projectHead, 'requirement'), { code: 'forbidden' });
+  await assert.rejects(() => reviewClient.documentReviewQueue(limited.grant, 'understanding'), { code: 'forbidden' });
+  assert.equal((await reviewClient.projectRecordDetail(limited.grant, understand(72))).review, null);
+  await assert.rejects(() => reviewClient.reviewProjectRecord(limited.grant, understand(72), approval), { code: 'forbidden' });
+  await assert.rejects(() => reviewClient.reviewProjectRecord(other, understand(72), approval), { code: 'not-found' });
+  await assert.rejects(() => reviewClient.reviewProjectRecord(director, { ...understand(75), id: 43 }, approval), { code: 'not-found' });
+  await assert.rejects(() => reviewClient.reviewProjectRecord(director, understand(73), approval), { code: 'project-review-conflict' });
+
+  const reviewed = await reviewClient.reviewProjectRecord(director, understand(72), approval);
+  assert.equal(reviewed.item.status, 'UD Approved By MD');
+  assert.equal(reviewed.review, null);
+  await assert.rejects(() => reviewClient.reviewProjectRecord(director, understand(72), approval), { code: 'project-review-conflict' });
+
+  const rejectionRevision = (await reviewClient.projectRecordDetail(projectHead, understand(73))).review.revision;
+  const write = (grant, payload) => fetch(new URL('projects/records/review', datesBase), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', ...(grant ? { Authorization: 'Bearer ' + grant.sessionToken } : {}) },
+    body: JSON.stringify(payload),
+  });
+  assert.equal((await write(null, { ...understand(72), ...approval })).status, 401);
+  const rejection = { decision: 'reject', revision: rejectionRevision };
+  for (const reason of ['', '   ', 'a'.repeat(256)]) {
+    assert.equal((await write(projectHead, { ...understand(73), ...rejection, reason })).status, 400);
+  }
+  const rejected = await reviewClient.reviewProjectRecord(projectHead, understand(73), { ...rejection, reason: ' Add a rollback checkpoint. ' });
+  assert.equal(rejected.item.status, 'UD Rejected By MD');
+  assert.equal(rejected.fields.rejectedBy, 'document-project-head');
+  assert.match(rejected.fields.rejectedDate, /^\d{2}-\d{2}-\d{4} \d{2}:\d{2}$/);
+  assert.equal(rejected.fields.rejectionReason, 'Add a rollback checkpoint.');
+  assert.equal((await reviewClient.projectRecordDetail(limited.grant, understand(73))).fields.rejectionReason, rejected.fields.rejectionReason);
+
+  const contenders = await Promise.all([director, projectHead].map(async (grant) => {
+    const revision = (await reviewClient.projectRecordDetail(grant, understand(74))).review.revision;
+    return { grant, revision };
+  }));
+  const race = await Promise.all(contenders.map(({ grant, revision }, index) => write(grant, {
+    ...understand(74), revision, ...(index ? { decision: 'reject', reason: 'Needs rollout date' } : { decision: 'approve' }),
+  })));
+  assert.deepEqual(race.map(({ status }) => status).sort(), [200, 409]);
+  assert.deepEqual((await reviewClient.documentReviewQueue(director, 'understanding')).items, []);
+
+  const requirementDetail = await reviewClient.projectRecordDetail(director, requirement);
+  assert.equal(requirementDetail.review.canReject, false);
+  const revision = requirementDetail.review.revision;
+  assert.equal((await write(director, { ...requirement, revision, decision: 'reject', reason: 'No' })).status, 400);
+  await assert.rejects(() => reviewClient.reviewProjectRecord(projectHead, requirement, { decision: 'approve', revision }), { code: 'forbidden' });
+  assert.equal((await reviewClient.reviewProjectRecord(director, requirement, { decision: 'approve', revision })).item.status, 'RD Approved');
+  assert.deepEqual((await reviewClient.documentReviewQueue(director, 'requirement')).items, []);
+});
+
 await test('authenticator enrollment generates a usable secret and prevents reusing a time slot', async () => {
   const first = await client.signIn(credentials('enroll'));
   assert.equal(first.kind, 'enrollment');

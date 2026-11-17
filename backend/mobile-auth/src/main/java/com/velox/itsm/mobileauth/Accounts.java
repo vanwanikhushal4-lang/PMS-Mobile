@@ -15,7 +15,7 @@ import org.json.JSONObject;
 
 /** Legacy identity is read-only. Task writes use the shared SCM mapping and the scoped connection. */
 public final class Accounts {
-    private static final String READ = "SELECT l.LOGINID, l.USERNAME, l.FULL_NAME, l.ROLE_TYPE, l.DESIGNATION, l.LOGIN_TYPE, l.EMAIL, l.PHONE,"
+    private static final String READ = "SELECT l.LOGINID, l.USERNAME, l.FULL_NAME, l.ROLE_TYPE, l.DESIGNATION, l.LOGIN_TYPE, l.EMAIL, l.PHONE, l.SIDEBAR_SCOPE,"
         + " c.COMPANY_CODE, c.COMPANY_NAME, m.PASSWORD_HASH, m.MFA_MODE, m.TOTP_ENCRYPTED, m.REVISION,"
         + " EXISTS(SELECT 1 FROM scm_mobile_project_access a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS PROJECT_ACCESS,"
         + " EXISTS(SELECT 1 FROM scm_mobile_project_create_context a WHERE a.LOGIN_ID=m.LOGIN_ID AND a.COMPANY_CODE=m.COMPANY_CODE) AS PROJECT_CREATE,"
@@ -73,11 +73,18 @@ public final class Accounts {
                 case "projects/detail": return Projects.detail(db, account, input.getInt("id"));
                 case "projects/records": return ProjectRecords.list(db, account, input.getInt("id"));
                 case "projects/records/detail": return ProjectRecords.detail(db, account, input);
+                case "projects/records/review-queue": return ProjectReview.queue(db, account, ProjectRecords.Kind.from(input.get("scope")), input.optInt("before"));
                 case "projects/tasks": return AssignedTasks.projectPage(db, account, input);
                 case "projects/favorite": return Projects.favorite(db, account, input.getInt("id"), input.getBoolean("favorite"));
                 case "projects/create-options": return ProjectCreation.options(db, account, input.optString("query"), input.optString("functionQuery"));
                 default: return Projects.page(db, account, input);
             }
+        }
+    }
+
+    JSONObject reviewProjectRecord(Account account, JSONObject input, LocalDateTime time) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return ProjectReview.decide(db, account, input, time);
         }
     }
 
@@ -250,6 +257,7 @@ public final class Accounts {
         final boolean projectCreate;
         final boolean purchaseOrderAccess;
         final boolean taskAccess;
+        private final String sidebarScope;
         final String username, fullname, role, designation, companyCode, companyName, email, phone, kind, mode, passwordHash, totp;
         Account(ResultSet data) throws SQLException {
             id = data.getInt("LOGINID"); revision = data.getLong("REVISION");
@@ -257,6 +265,7 @@ public final class Accounts {
             projectCreate = data.getBoolean("PROJECT_CREATE");
             purchaseOrderAccess = data.getBoolean("PURCHASE_ORDER_ACCESS");
             taskAccess = data.getBoolean("TASK_ACCESS");
+            sidebarScope = clean(data, "SIDEBAR_SCOPE");
             username = clean(data, "USERNAME"); fullname = clean(data, "FULL_NAME"); role = clean(data, "ROLE_TYPE");
             designation = clean(data, "DESIGNATION"); companyCode = clean(data, "COMPANY_CODE"); companyName = clean(data, "COMPANY_NAME");
             email = clean(data, "EMAIL"); phone = clean(data, "PHONE"); kind = clean(data, "LOGIN_TYPE"); mode = clean(data, "MFA_MODE");
@@ -271,11 +280,17 @@ public final class Accounts {
         boolean projectWorkspace() { return projectAccess || projectCreate || purchaseOrderAccess; }
         boolean publishingAccess() { return purchaseOrderAccess || ((projectAccess || projectCreate) && taskAccess); }
         boolean taskWorkspace() { return taskAccess || TaskRoster.canCreate(this); }
+        boolean hasSidebarScope(String scope) {
+            for (String token : sidebarScope.split(",")) if (scope.equals(token.trim())) return true;
+            return false;
+        }
         JSONObject identity() {
             JSONArray capabilities = new JSONArray();
             if (projectWorkspace()) capabilities.put("projects.read");
             if (projectCreate) capabilities.put("projects.create");
             if (publishingAccess()) capabilities.put("projects.publish");
+            if (ProjectReview.allowed(this, ProjectRecords.Kind.REQUIREMENT)) capabilities.put("projects.requirement-review");
+            if (ProjectReview.allowed(this, ProjectRecords.Kind.UNDERSTANDING)) capabilities.put("projects.understanding-review");
             if (taskWorkspace()) capabilities.put("tasks.assigned-by-me").put("tasks.assigned-to-me");
             if ((projectAccess || projectCreate) && TaskRoster.canCreate(this)) capabilities.put("tasks.create");
             if (TaskRoster.canCreate(this)) capabilities.put("tasks.create-standalone");

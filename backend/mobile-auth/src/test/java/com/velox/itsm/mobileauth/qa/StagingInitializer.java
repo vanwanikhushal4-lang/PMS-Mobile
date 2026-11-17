@@ -55,7 +55,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
             JdbcDataSource db = new JdbcDataSource();
             db.setURL("jdbc:h2:mem:scm" + instance.replace('-', '_').replace('/', '_') + ";MODE=MySQL;DB_CLOSE_DELAY=-1");
             try (Connection connection = db.getConnection(); Statement sql = connection.createStatement()) {
-                sql.execute("CREATE TABLE LOGINMASTER (LOGINID INT PRIMARY KEY, USERNAME VARCHAR(128), FULL_NAME VARCHAR(128), ROLE_TYPE VARCHAR(96), DESIGNATION VARCHAR(128), LOGIN_TYPE VARCHAR(12), EMAIL VARCHAR(254), PHONE VARCHAR(16), COMPANY VARCHAR(128), LOCATION VARCHAR(128), BRANCH VARCHAR(128), DEPARTMENT VARCHAR(128), SUB_DEPARTMENT VARCHAR(128))");
+                sql.execute("CREATE TABLE LOGINMASTER (LOGINID INT PRIMARY KEY, USERNAME VARCHAR(128), FULL_NAME VARCHAR(128), ROLE_TYPE VARCHAR(96), DESIGNATION VARCHAR(128), LOGIN_TYPE VARCHAR(12), EMAIL VARCHAR(254), PHONE VARCHAR(16), COMPANY VARCHAR(128), LOCATION VARCHAR(128), BRANCH VARCHAR(128), DEPARTMENT VARCHAR(128), SUB_DEPARTMENT VARCHAR(128), SIDEBAR_SCOPE VARCHAR(1000))");
                 sql.execute("CREATE TABLE company_code_master (COMPANY_NAME VARCHAR(128), COMPANY_CODE VARCHAR(48))");
                 sql.execute("INSERT INTO company_code_master VALUES ('QA Service Operations', 'QA-A'), ('QA Second Company', 'QA-B')");
                 sql.execute("CREATE TABLE TICKET (T_ID VARCHAR(500), T_REQUESTER VARCHAR(128), T_COMPANY VARCHAR(128), STATUS VARCHAR(500))");
@@ -103,6 +103,13 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 seed(connection, 11, "schedule-assignee", "Mira Desai", "Tester", "Non-AD", "mira@fixture.invalid", "+12025550111", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 12, "project-creator", "Anika Mehta", "Implementor", "Non-AD", "anika@fixture.invalid", "+12025550112", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 13, "publish-reviewer", "Samira Rao", "Implementor", "Non-AD", "samira@fixture.invalid", "+12025550113", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 14, "document-director", "Sonal Verma", "MD", "Non-AD", "sonal@fixture.invalid", "+12025550114", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 15, "document-project-head", "Riya Naik", "Head_Projects", "Non-AD", "riya@fixture.invalid", "+12025550115", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 16, "document-limited", "Neil Kapoor", "MD", "Non-AD", "neil@fixture.invalid", "+12025550116", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 17, "document-other-company", "Alok Mehta", "MD", "Non-AD", "alok@fixture.invalid", "+12025550117", "QA Second Company", "QA-B", "off", hash, null, true);
+                sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMS,Requirement_Documents' WHERE LOGINID=14");
+                sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMS' WHERE LOGINID IN (15,17)");
+                sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMSArchive,Requirement_Documents_Archive' WHERE LOGINID=16");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Pune', BRANCH='West office', DEPARTMENT='Commercial operations', SUB_DEPARTMENT='Delivery' WHERE LOGINID=1");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Chennai', BRANCH='South office', DEPARTMENT='Engineering' WHERE LOGINID=2");
                 sql.execute("CREATE TABLE ProjectData (SR_NO INT PRIMARY KEY, PROJECTNAME VARCHAR(500), CUSTOMERNAME VARCHAR(500), FUNCTION_NAME VARCHAR(500), RESPONSIBILITY VARCHAR(500), PRODUCTSUIT VARCHAR(500), PRODUCTTOOL VARCHAR(500), Task_ID VARCHAR(500))");
@@ -112,7 +119,9 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " (44,'VPN 100% Coverage','Riverside Works','Access rollout','Service desk transition','Service Operations','VPN Access','PM-1044'),"
                     + " (51,'Warehouse Inventory','Valley Logistics','Stock control','Warehouse onboarding','SCM Operations','Stock Review','PM-1051'),"
                     + " (52,'Unassigned Project','Valley Logistics',NULL,NULL,NULL,NULL,NULL)");
+                sql.execute("INSERT INTO ProjectData VALUES (47,'Riverside change board','Riverside Works','Change review','Pilot readiness','Service Operations','VPN Access','PM-1047')");
                 sql.execute("INSERT INTO scm_mobile_project_access VALUES (1,'QA-A',41), (1,'QA-A',43), (1,'QA-A',44), (2,'QA-B',51), (1,'QA-B',52)");
+                sql.execute("INSERT INTO scm_mobile_project_access VALUES (14,'QA-A',47),(15,'QA-A',47),(16,'QA-A',47),(17,'QA-B',51)");
                 sql.execute("ALTER TABLE ProjectData ADD SUBMITTEDBY VARCHAR(128)");
                 sql.execute("CREATE TABLE FunctionMaster (SR_NO INT PRIMARY KEY, MODULE VARCHAR(120), FUNCTION_NAME VARCHAR(240))");
                 sql.execute("INSERT INTO FunctionMaster VALUES (1,'PMS','Access rollout'),(2,'PMS','Development'),(3,'PMS','Implementation'),(4,'PMS','Development planning')");
@@ -130,6 +139,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 sql.execute("INSERT INTO ProjectKickOfMeeting VALUES (81,'Meeting Scheduled','19-11-2026 10:00','Video conference')");
                 seedRecordDetails(sql);
                 sql.execute("INSERT INTO scm_mobile_project_record VALUES (44,'QA-A','requirement',61), (44,'QA-A','understanding',71), (44,'QA-A','kickoff',81), (44,'QA-B','requirement',62), (51,'QA-B','requirement',63)");
+                seedDocumentReview(sql);
                 sql.execute("CREATE TABLE DaywiseTask (SR_NO INT PRIMARY KEY, STATUS VARCHAR(120), CUSTOMERNAME VARCHAR(120), PRODUCTSUIT VARCHAR(120), PRODUCTTOOL VARCHAR(120), DESCRIPTION VARCHAR(2000), MODULE_NAME VARCHAR(120), TEAM_LEADER VARCHAR(120), DEVELOPER_NAME VARCHAR(120), START_DATE VARCHAR(120), END_DATE VARCHAR(120), ASSIGNBY VARCHAR(128))");
                 sql.execute("INSERT INTO DaywiseTask VALUES"
                     + " (201,'Pending','Riverside Works','Service Operations','VPN Access','Check access policies for the first pilot group.','Pilot readiness','Dev Singh','Noor Paul','16.11.2026','20.11.2026','Alex Rao'),"
@@ -307,6 +317,19 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
         sql.execute("UPDATE ProjectKickOfMeeting SET Po_Number='PO-910', UD_number='UD-71', ProjectHead='Anika Mehta',"
             + " VideoConferenceMeeting='Teams', GeneratedLink='https://meet.fixture.invalid/riverside-kickoff',"
             + " UploadFile1='Riverside agenda.pdf', UploadFile2='Riverside meeting plan.pdf' WHERE SR_NO=81");
+    }
+
+    private static void seedDocumentReview(Statement sql) throws java.sql.SQLException {
+        sql.execute("INSERT INTO requirementDocument (SR_NO,rd_id,RDStatus,Date,POnumber,UserName,rdNote) VALUES"
+            + " (64,'RD-64','RD Pending For Approval','20-11-2026','PO-910','Alex Rao','Confirm the Riverside rollout requirements')");
+        sql.execute("INSERT INTO UnderstandingDocument (SR_NO,ud_id,UDStatus,Date,POnumber,projectObj,rd_id) VALUES"
+            + " (72,'UD-72','UD Pending For Approval','20-11-2026','PO-910','Validate the pilot schedule before enabling VPN access','RD-64'),"
+            + " (73,'UD-73','UD Pending For Approval','21-11-2026','PO-910','Review the rollback steps for remote access','RD-64'),"
+            + " (74,'UD-74','UD Pending For Approval','22-11-2026','PO-910','Review the staged access plan','RD-64'),"
+            + " (75,'UD-75','UD Pending For Approval','23-11-2026',NULL,'Different project',NULL),"
+            + " (76,'UD-76','UD Pending For Approval','24-11-2026',NULL,'Different company',NULL)");
+        sql.execute("INSERT INTO scm_mobile_project_record VALUES (47,'QA-A','requirement',64), (47,'QA-A','understanding',72),"
+            + " (47,'QA-A','understanding',73), (47,'QA-A','understanding',74), (43,'QA-A','understanding',75), (51,'QA-B','understanding',76)");
     }
 
     private static byte[] fixturePdf(String message) {

@@ -5,6 +5,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.Locale;
+import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -82,28 +83,42 @@ final class ProjectRecords {
     }
 
     static JSONObject detail(Connection db, Accounts.Account account, JSONObject input) throws SQLException {
+        return detail(db, account, input, false);
+    }
+
+    static JSONObject detail(Connection db, Accounts.Account account, JSONObject input, boolean lock) throws SQLException {
         int project = input.getInt("id");
         Kind kind = Kind.from(input.get("scope"));
         StringBuilder sql = new StringBuilder(columns(kind));
         for (String[] field : kind.details) sql.append(", d.").append(field[1]);
         sql.append(kind.scopedFrom()).append(" AND l.RECORD_ID=?");
+        if (lock) sql.append(" FOR UPDATE");
         try (PreparedStatement query = db.prepareStatement(sql.toString())) {
             bindScope(query, account, project, kind);
             query.setInt(5, input.getInt("recordId"));
             try (ResultSet row = query.executeQuery()) {
                 if (!row.next()) return null;
                 JSONObject fields = new JSONObject();
+                JSONArray snapshot = new JSONArray();
                 for (String[] field : kind.details) {
                     String value = text(row, field[1]);
                     if (!value.isEmpty()) fields.put(field[0], value);
+                    snapshot.put(value);
                 }
-                return new JSONObject().put("kind", "project-record-detail").put("projectId", project)
-                    .put("scope", kind.key).put("item", summary(row)).put("fields", fields);
+                JSONObject item = summary(row);
+                JSONObject response = new JSONObject().put("kind", "project-record-detail").put("projectId", project)
+                    .put("scope", kind.key).put("item", item).put("fields", fields);
+                if (ProjectReview.allowed(account, kind) && ProjectReview.pendingStatus(kind).equalsIgnoreCase(row.getString("RECORD_STATUS"))) {
+                    JSONObject target = new JSONObject().put("scope", kind.key).put("id", project).put("recordId", item.getInt("id"));
+                    Map<String, String> files = ProjectAttachments.filenames(db, account, ProjectAttachments.Target.parse(target, false));
+                    if (files != null) response.put("review", ProjectReview.options(account, kind, project, item, snapshot, files));
+                }
+                return response;
             }
         }
     }
 
-    private static String columns(Kind kind) {
+    static String columns(Kind kind) {
         return "SELECT d.SR_NO, " + kind.reference + " AS REFERENCE_CODE, " + kind.status + " AS RECORD_STATUS,"
             + " d.Date AS RECORD_DATE, " + kind.format + " AS MEETING_FORMAT";
     }
@@ -115,13 +130,13 @@ final class ProjectRecords {
         query.setString(4, kind.key);
     }
 
-    private static JSONObject summary(ResultSet row) throws SQLException {
+    static JSONObject summary(ResultSet row) throws SQLException {
         return new JSONObject().put("id", row.getInt("SR_NO"))
             .put("reference", text(row, "REFERENCE_CODE")).put("date", text(row, "RECORD_DATE"))
             .put("status", text(row, "RECORD_STATUS")).put("format", text(row, "MEETING_FORMAT"));
     }
 
-    private static String text(ResultSet row, String column) throws SQLException {
+    static String text(ResultSet row, String column) throws SQLException {
         String raw = row.getString(column);
         if (raw == null) return "";
         String value = raw.trim();

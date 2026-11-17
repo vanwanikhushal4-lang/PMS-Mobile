@@ -19,7 +19,11 @@ export type ProjectRecordGroup = { items: ProjectRecord[]; hasMore: boolean };
 export type ProjectRecords = { projectId: number; requirements: ProjectRecordGroup; understanding: ProjectRecordGroup; kickoff: ProjectRecordGroup };
 export type ProjectRecordScope = 'requirement' | 'understanding' | 'kickoff';
 export type ProjectRecordTarget = { scope: ProjectRecordScope; id: number; recordId: number };
-export type ProjectRecordDetail = { item: ProjectRecord; fields: Record<string, string> };
+export type DocumentReviewScope = Exclude<ProjectRecordScope, 'kickoff'>;
+export type DocumentReviewDecision = { decision: 'approve'; revision: string } | { decision: 'reject'; revision: string; reason: string };
+export type ProjectRecordDetail = { item: ProjectRecord; fields: Record<string, string>; review: { revision: string; canReject: boolean } | null };
+export type DocumentReviewItem = ProjectRecord & { projectId: number; projectName: string; projectReference: string };
+export type DocumentReviewPage = { items: DocumentReviewItem[]; next: number | null };
 
 export const projectRecordTitles: Record<ProjectRecordScope, string> = {
   requirement: 'Requirement document', understanding: 'Understanding document', kickoff: 'Kickoff meeting',
@@ -168,7 +172,31 @@ export function decodeProjectRecordDetail(value: unknown, target: ProjectRecordT
       fields[key] = text;
     }
   }
-  return { item, fields };
+  let review: ProjectRecordDetail['review'] = null;
+  if (body.review !== undefined) {
+    const options = object(body.review);
+    if (target.scope === 'kickoff' || typeof options?.revision !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(options.revision)
+      || options.canReject !== (target.scope === 'understanding')) return null;
+    review = { revision: options.revision, canReject: options.canReject };
+  }
+  return { item, fields, review };
+}
+
+export function decodeDocumentReviewQueue(value: unknown, scope: DocumentReviewScope, before?: number): DocumentReviewPage | null {
+  const body = object(value);
+  if (body?.kind !== 'project-review-queue' || body.scope !== scope || !Array.isArray(body.items) || body.items.length > 30) return null;
+  const items: DocumentReviewItem[] = [];
+  for (const entry of body.items as unknown[]) {
+    const summary = record(entry);
+    const { projectId, projectName, projectReference } = object(entry) ?? {};
+    const limit = items.at(-1)?.id ?? before;
+    if (!summary || (limit !== undefined && summary.id >= limit)
+      || !id(projectId) || !label(projectName) || !label(projectReference)) return null;
+    items.push({ ...summary, projectId, projectName, projectReference });
+  }
+  const { next } = body;
+  if (next !== null && (!id(next) || items.length !== 30 || items.at(-1)?.id !== next)) return null;
+  return { items, next };
 }
 
 export function decodeProjectRecords(value: unknown): ProjectRecords | null {
