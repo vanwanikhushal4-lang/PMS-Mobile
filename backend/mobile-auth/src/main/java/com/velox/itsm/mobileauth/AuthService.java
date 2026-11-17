@@ -52,6 +52,8 @@ public final class AuthService implements AutoCloseable {
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
+            case "tasks/assignments/list": case "tasks/assignments/project-options": case "tasks/assignments/options":
+            case "tasks/assignments/create": case "tasks/assignments/reassign":
                 return session(action, input, bearer, now);
             default: break;
         }
@@ -229,6 +231,8 @@ public final class AuthService implements AutoCloseable {
             case "tasks/assigned-by-me": case "tasks/assigned-to-me": case "tasks/completed":
             case "tasks/work-log": case "tasks/progress": case "tasks/complete":
             case "tasks/dates/list": case "tasks/dates/detail": case "tasks/dates/request": case "tasks/dates/approve":
+            case "tasks/assignments/list": case "tasks/assignments/project-options": case "tasks/assignments/options":
+            case "tasks/assignments/create": case "tasks/assignments/reassign":
                 result = tasks(action, input, key, account, now);
                 break;
             default: result = reply(200, authenticated(account, item.until));
@@ -238,7 +242,7 @@ public final class AuthService implements AutoCloseable {
     }
 
     private Reply projects(String action, JSONObject input, String key, Account account, long now) throws SQLException {
-        if (!account.projectAccess || ("projects/tasks".equals(action) && !account.taskAccess)) return rejected(403, "forbidden");
+        if (!account.projectAccess || ("projects/tasks".equals(action) && !account.taskWorkspace())) return rejected(403, "forbidden");
         if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
         if (!Projects.valid(input, action)) return rejected(400, "invalid-filter");
         JSONObject projects = accounts.projects(account, input, action);
@@ -246,8 +250,9 @@ public final class AuthService implements AutoCloseable {
     }
 
     private Reply tasks(String action, JSONObject input, String key, Account account, long now) throws SQLException {
-        if (!account.taskAccess) return rejected(403, "forbidden");
+        if (!account.taskWorkspace()) return rejected(403, "forbidden");
         if (!take("tasks/" + key, 100, now)) return rejected(429, "rate-limited");
+        if (action.startsWith("tasks/assignments/") && !"tasks/assignments/list".equals(action)) return assignments(action, input, account, now);
         if (action.startsWith("tasks/dates/")) return dates(action, input, account, now);
         if ("tasks/work-log".equals(action)) {
             if (input.length() != 1 || !AssignedTasks.validId(input.opt("id"))) return rejected(400, "invalid-filter");
@@ -261,6 +266,35 @@ public final class AuthService implements AutoCloseable {
             before = input.getInt("before");
         }
         return reply(200, accounts.assignedTasks(account, before, action));
+    }
+
+    private Reply assignments(String action, JSONObject input, Account account, long now) throws SQLException {
+        boolean create = "tasks/assignments/create".equals(action);
+        boolean projectOptions = "tasks/assignments/project-options".equals(action);
+        boolean project = create || projectOptions;
+        if (project && (!account.projectAccess || !TaskRoster.canCreate(account))) return rejected(403, "forbidden");
+        if (!AssignedTasks.validId(input.opt("id"))) return rejected(400, "invalid-filter");
+        int id = input.getInt("id");
+        JSONObject response;
+        if (create) {
+            if (!TaskAssignments.validDraft(input)) return rejected(400, "invalid-task-draft");
+            response = accounts.createTask(account, input, TaskProgress.localTime(now));
+        } else if ("tasks/assignments/reassign".equals(action)) {
+            if (input.length() != 3 || !TaskAssignments.token(input.opt("revision")) || !TaskAssignments.token(input.opt("candidate")))
+                return rejected(400, "invalid-filter");
+            response = accounts.reassignTask(account, id, input.getString("revision"), input.getString("candidate"));
+        } else {
+            boolean searching = input.has("query");
+            if (input.length() != (searching ? 2 : 1)
+                    || (searching && (!(input.opt("query") instanceof String) || input.getString("query").length() > 120)))
+                return rejected(400, "invalid-filter");
+            response = accounts.assignmentOptions(account, id, input.optString("query").trim(), project);
+        }
+        if (response == null) return rejected(404, project ? "project-not-found" : "task-not-found");
+        if ("rejected".equals(response.optString("kind"))) {
+            return reply("invalid-task-draft".equals(response.optString("reason")) ? 400 : 409, response);
+        }
+        return reply(200, response);
     }
 
     private Reply dates(String action, JSONObject input, Account account, long now) throws SQLException {

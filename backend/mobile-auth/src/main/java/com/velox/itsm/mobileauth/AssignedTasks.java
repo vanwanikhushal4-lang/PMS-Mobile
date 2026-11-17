@@ -7,6 +7,7 @@ import java.sql.SQLException;
 import java.util.Locale;
 import org.json.JSONArray;
 import org.json.JSONObject;
+import org.springframework.web.util.HtmlUtils;
 
 final class AssignedTasks {
     private static final int PAGE_SIZE = 30;
@@ -17,7 +18,8 @@ final class AssignedTasks {
         + " AND (t.updateDate_Status IS NULL OR t.updateDate_Status='' OR t.updateDate_Status='Date Approved'))";
     static final String OWNED_HISTORY = SCOPED + MINE + " AND (" + PENDING + " OR t.STATUS='Completed')";
     private static final String TASK_FIELDS = "SELECT t.SR_NO, t.STATUS, t.CUSTOMERNAME, t.PRODUCTSUIT, t.PRODUCTTOOL,"
-        + " t.DESCRIPTION, t.MODULE_NAME, t.TEAM_LEADER, t.DEVELOPER_NAME, t.ASSIGNBY, t.START_DATE, t.END_DATE, t.updateDate_Status, t.MANAGER_NAME";
+        + " t.DESCRIPTION, t.MODULE_NAME, t.TEAM_LEADER, t.DEVELOPER_NAME, t.ASSIGNBY, t.START_DATE, t.END_DATE,"
+        + " t.updateDate_Status, t.MANAGER_NAME, t.Task_ID, t.PRIORITY, t.WEIGHTAGE";
     private static final int LOG_LIMIT = 20;
 
     private AssignedTasks() {}
@@ -33,6 +35,10 @@ final class AssignedTasks {
         switch (action) {
             case "tasks/assigned-to-me": scope = MINE + " AND " + PENDING; break;
             case "tasks/completed": scope = MINE + " AND t.STATUS='Completed'"; break;
+            case "tasks/assignments/list":
+                scope = " AND t.STATUS<> 'Completed'" + (TaskRoster.role(account.role, "Implementor")
+                    ? " AND t.MANAGER_NAME=?" : " AND t.TEAM_LEADER=?");
+                break;
             default: scope = " AND t.ASSIGNBY=?";
         }
         String sql = TASK_FIELDS + SCOPED + scope
@@ -120,10 +126,12 @@ final class AssignedTasks {
                 boolean history = account.fullname.equalsIgnoreCase(developer) && ("Completed".equalsIgnoreCase(status)
                     || ("Pending".equalsIgnoreCase(status) && (dateApproval.isEmpty() || "Date Approved".equalsIgnoreCase(dateApproval))));
                 items.put(new JSONObject().put("id", last)
-                    .put("module", label(rows, "MODULE_NAME")).put("status", status).put("workLog", history)
+                    .put("module", HtmlUtils.htmlUnescape(label(rows, "MODULE_NAME"))).put("status", status).put("workLog", history)
+                    .put("reassignable", !status.isEmpty() && !"Completed".equalsIgnoreCase(status) && TaskAssignments.manages(account, lead, manager))
                     .put("dateAccess", dateAccess).put("dateApproval", dateAccess ? dateApproval : "")
+                    .put("reference", label(rows, "Task_ID")).put("priority", label(rows, "PRIORITY")).put("weight", label(rows, "WEIGHTAGE"))
                     .put("customer", label(rows, "CUSTOMERNAME")).put("suite", label(rows, "PRODUCTSUIT"))
-                    .put("tool", label(rows, "PRODUCTTOOL")).put("description", label(rows, "DESCRIPTION"))
+                    .put("tool", label(rows, "PRODUCTTOOL")).put("description", HtmlUtils.htmlUnescape(label(rows, "DESCRIPTION")))
                     .put("lead", lead).put("developer", developer)
                     .put("assigner", label(rows, "ASSIGNBY")).put("start", label(rows, "START_DATE")).put("due", label(rows, "END_DATE")));
             }

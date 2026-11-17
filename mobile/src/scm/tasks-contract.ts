@@ -1,7 +1,8 @@
 export type AssignedTask = {
   id: number; module: string; status: string; customer: string; suite: string; tool: string;
   description: string; lead: string; developer: string; assigner: string; start: string; due: string;
-  workLog: boolean; dateAccess: boolean; dateApproval: string;
+  workLog: boolean; dateAccess: boolean; dateApproval: string; reassignable: boolean;
+  reference: string; priority: string; weight: string;
 };
 export type AssignedTaskPage = { items: AssignedTask[]; next: number | null };
 export type WorkLog = {
@@ -9,6 +10,10 @@ export type WorkLog = {
   hasMore: boolean; date: string; completed: boolean; loggedToday: boolean;
 };
 export type DateQueue = 'mine' | 'team' | 'review';
+export type TaskAssignee = { key: string; name: string; role: string; lead: string; manager: string };
+export type TaskDraft = {
+  module: string; description: string; start: string; due: string; priority: string; weight: string; candidate: string; requestKey: string;
+};
 export type TaskDates = {
   taskId: number; start: string; due: string; approval: string; requestedStart: string; requestedDue: string; reason: string;
   revision: string | null; requestMode: 'due' | 'schedule' | 'none'; canApprove: boolean; hasMore: boolean;
@@ -33,17 +38,38 @@ export function decodeAssignedTasks(value: unknown): AssignedTaskPage | null {
     const row = object(raw);
     if (!row) return null;
     const { id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due,
-      workLog = false, dateAccess = false, dateApproval = '' } = row;
+      workLog = false, dateAccess = false, dateApproval = '', reassignable = false, reference = '', priority = '', weight = '' } = row;
     const previous = items.at(-1);
     if (!id(number) || (previous && number >= previous.id) || !label(module) || !label(status) || !label(customer)
       || !label(suite) || !label(tool) || typeof description !== 'string' || description.length > 16_384
       || !label(lead) || !label(developer) || !label(assigner) || !label(start) || !label(due) || typeof workLog !== 'boolean'
-      || typeof dateAccess !== 'boolean' || !label(dateApproval)) return null;
-    items.push({ id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due, workLog, dateAccess, dateApproval });
+      || typeof dateAccess !== 'boolean' || !label(dateApproval) || typeof reassignable !== 'boolean'
+      || !label(reference) || !label(priority) || !label(weight)) return null;
+    items.push({ id: number, module, status, customer, suite, tool, description, lead, developer, assigner, start, due,
+      workLog, dateAccess, dateApproval, reassignable, reference, priority, weight });
   }
   const next = body.next;
   if (next !== null && (!id(next) || items.length !== 30 || items.at(-1)?.id !== next)) return null;
   return { items, next };
+}
+
+export function decodeTaskAssignees(value: unknown) {
+  const body = object(value);
+  if (body?.kind !== 'task-assignees' || !id(body.id) || typeof body.hasMore !== 'boolean'
+    || !Array.isArray(body.items) || body.items.length > 30 || (body.hasMore && body.items.length !== 30)
+    || (body.revision !== null && (typeof body.revision !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(body.revision)))) return null;
+  const items: TaskAssignee[] = [];
+  const keys = new Set<string>();
+  for (const raw of body.items as unknown[]) {
+    const row = object(raw);
+    if (!row) return null;
+    const { key, name, role, lead, manager } = row;
+    if (typeof key !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(key) || keys.has(key)
+      || !label(name) || !name || !label(role) || !label(lead) || !label(manager)) return null;
+    keys.add(key);
+    items.push({ key, name, role, lead, manager });
+  }
+  return { id: body.id, revision: body.revision, items, hasMore: body.hasMore };
 }
 
 export function decodeTaskDates(value: unknown): TaskDates | null {

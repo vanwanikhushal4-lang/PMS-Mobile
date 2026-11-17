@@ -4,10 +4,12 @@ import { AuthError, type Grant } from '../scm/auth-api';
 import { authClient } from '../scm/auth-config';
 import { useProtectedRead } from '../scm/protected-read';
 import { scheduleLabel, taskSchedule } from '../scm/project-schedule';
+import { useSession } from '../scm/session';
 import type { AssignedTask } from '../scm/tasks-contract';
 import { FormMessage, Phase, SearchField, TextAction } from './Access';
 import { Action, DetailRecord, type } from './Primitives';
 import { TaskDatePanel } from './TaskDatePanel';
+import { TaskAssignmentForm, TaskReassignment } from './TaskAssignmentForm';
 import { TaskWorkLog } from './TaskWorkLog';
 import { useReducedMotion } from './motion';
 import { color } from './theme';
@@ -32,6 +34,10 @@ function taskName(task: AssignedTask) {
 }
 
 export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView | null; shift: number }) {
+  const { state } = useSession();
+  const reduced = useReducedMotion();
+  const canCreate = state.kind === 'active' && state.session.identity.capabilities.includes('tasks.create');
+  const [creating, setCreating] = useState(false);
   const [input, setInput] = useState('');
   const [term, setTerm] = useState('');
   const [cursors, setCursors] = useState<number[]>([]);
@@ -60,6 +66,10 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
   if (!view) return null;
 
   return <View style={styles.pane}>
+    {canCreate ? <TextAction label="Create task" testID="open-create-task" onPress={() => {
+      setConfirmation('');
+      setCreating(true);
+    }} /> : null}
     <SearchField label="Search project tasks" placeholder="Task, assignee or status" value={input}
       onChange={setInput} onSubmit={() => search(input)} testID="project-task-search"
       onClear={input || term ? () => { setInput(''); search(''); } : undefined} />
@@ -86,6 +96,25 @@ export function ProjectTasks({ id, view, shift }: { id: number; view: TaskView |
     </Phase> : null}
     {selectedTask ? <TaskDetails task={selectedTask} close={() => setSelected(null)}
       onChanged={(message) => { setSelected(null); setConfirmation(message); reload(); }} /> : null}
+    {creating ? <Modal visible transparent animationType={reduced ? 'none' : 'slide'} onRequestClose={() => setCreating(false)}>
+      <KeyboardAvoidingView style={styles.modal} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <View accessibilityViewIsModal style={styles.sheet}>
+          <View style={styles.sheetHeader}>
+            <Text accessibilityRole="header" style={styles.taskTitle}>Create project task</Text>
+          </View>
+          <ScrollView style={styles.sheetScroll} keyboardShouldPersistTaps="handled">
+            <TaskAssignmentForm id={id} create cancel={() => setCreating(false)} onDone={(taskId) => {
+              setCreating(false);
+              setInput('');
+              setTerm('');
+              setCursors([]);
+              setConfirmation('Task T-' + taskId + ' created');
+              reload();
+            }} />
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal> : null}
   </View>;
 }
 
@@ -187,9 +216,13 @@ function TaskDetails({ task, close, onChanged }: { task: AssignedTask; close: ()
           {task.description ? <Text style={type.body}>{task.description}</Text> : null}
           {task.dateAccess ? <TaskDatePanel id={task.id}
             onChanged={(action) => onChanged(action === 'request' ? 'Date request sent' : 'Dates approved')} /> : null}
+          {task.reassignable ? <TaskReassignment id={task.id} onDone={() => onChanged('Task reassigned')} /> : null}
           {task.workLog ? <TaskWorkLog id={task.id} onComplete={() => onChanged('Task T-' + task.id + ' completed')} /> : null}
           <DetailRecord rows={[
             ['Status', task.status], ['Assignee', task.developer], ['Assigned by', task.assigner], ['Team lead', task.lead],
+            ...(task.reference ? [['SCM reference', task.reference]] as const : []),
+            ...(task.priority ? [['Priority', task.priority]] as const : []),
+            ...(task.weight ? [['Weight', task.weight + '%']] as const : []),
             ...(task.dateAccess ? [] : [['Start date', task.start], ['Due date', task.due]] as const),
           ]} />
         </ScrollView>

@@ -83,7 +83,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     incident.executeBatch();
                     history.executeBatch();
                 }
-                for (String resource : new String[]{"/var/schema.sql", "/var/schema-projects.sql", "/var/schema-tasks.sql", "/var/schema-project-workspace.sql"}) {
+                for (String resource : new String[]{"/var/schema.sql", "/var/schema-projects.sql", "/var/schema-tasks.sql", "/var/schema-project-workspace.sql", "/var/schema-task-assignment.sql"}) {
                     try (InputStream stream = QA.class.getResourceAsStream(resource); Scanner schema = new Scanner(stream, "UTF-8").useDelimiter("\\A")) {
                         for (String statement : schema.next().split(";")) if (!statement.trim().isEmpty()) sql.execute(statement);
                     }
@@ -93,10 +93,10 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 seed(connection, 2, "alex", "Alex Kim", "Engineer", "Non-AD", "alex-b@fixture.invalid", "+12025550102", "QA Second Company", "QA-B", "off", secrets.passwordHash("Second-company-fixture-only"), null, true);
                 seed(connection, 3, "sms", "Nina Shah", "Ticket Co-ordinator", "Non-AD", "nina@fixture.invalid", "+12025550103", "QA Service Operations", "QA-A", "sms", hash, null, true);
                 seed(connection, 4, "enroll", "Dev Singh", "Developer", "Non-AD", "dev@fixture.invalid", "+12025550104", "QA Service Operations", "QA-A", "totp", hash, null, true);
-                seed(connection, 5, "totp", "Noor Paul", "Engineer", "Non-AD", "noor@fixture.invalid", "+12025550105", "QA Service Operations", "QA-A", "totp", hash, secrets.encryptTotp(5, TOTP), true);
+                seed(connection, 5, "totp", "Noor Paul", "Developer", "Non-AD", "noor@fixture.invalid", "+12025550105", "QA Service Operations", "QA-A", "totp", hash, secrets.encryptTotp(5, TOTP), true);
                 seed(connection, 6, "directory", "Maya Sen", "Engineer", "AD", "dir@fixture.invalid", "+12025550106", "QA Service Operations", "QA-A", "off", null, null, true);
-                seed(connection, 7, "disabled", "Ari Shah", "Sales Manager", "Non-AD", "ari@fixture.invalid", "+12025550107", "QA Service Operations", "QA-A", "off", hash, null, false);
-                seed(connection, 8, "phone", "Gia Gupta", "Engineer", "Non-AD", "gia@fixture.invalid", "+12025550108", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 7, "disabled", "Ari Shah", "Developer", "Non-AD", "ari@fixture.invalid", "+12025550107", "QA Service Operations", "QA-A", "off", hash, null, false);
+                seed(connection, 8, "phone", "Gia Gupta", "Implementor", "Non-AD", "gia@fixture.invalid", "+12025550108", "QA Service Operations", "QA-A", "off", hash, null, true);
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Pune', BRANCH='West office', DEPARTMENT='Commercial operations', SUB_DEPARTMENT='Delivery' WHERE LOGINID=1");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Chennai', BRANCH='South office', DEPARTMENT='Engineering' WHERE LOGINID=2");
                 sql.execute("CREATE TABLE ProjectData (SR_NO INT PRIMARY KEY, PROJECTNAME VARCHAR(500), CUSTOMERNAME VARCHAR(500), FUNCTION_NAME VARCHAR(500), RESPONSIBILITY VARCHAR(500), PRODUCTSUIT VARCHAR(500), PRODUCTTOOL VARCHAR(500), Task_ID VARCHAR(500))");
@@ -132,6 +132,12 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 sql.execute("ALTER TABLE DaywiseTask ADD updateTimeDate VARCHAR(120)");
                 sql.execute("ALTER TABLE DaywiseTask ADD updateDateCount VARCHAR(120)");
                 sql.execute("ALTER TABLE DaywiseTask ADD dateUpdateBy VARCHAR(128)");
+                sql.execute("ALTER TABLE DaywiseTask ADD Task_ID VARCHAR(255)");
+                sql.execute("ALTER TABLE DaywiseTask ADD RESPONSIBILITY VARCHAR(500)");
+                sql.execute("ALTER TABLE DaywiseTask ADD WEIGHTAGE VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD PRIORITY VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD Assign_date VARCHAR(120)");
+                sql.execute("ALTER TABLE DaywiseTask ADD Assign_time VARCHAR(120)");
                 sql.execute("INSERT INTO DaywiseTask (SR_NO,STATUS,CUSTOMERNAME,PRODUCTSUIT,PRODUCTTOOL,DESCRIPTION,MODULE_NAME,TEAM_LEADER,DEVELOPER_NAME,START_DATE,END_DATE,ASSIGNBY,updateDate_Status) VALUES"
                     + " (206,'Pending','Riverside Works','Service Operations','VPN Access','Check the second pilot group before rollout.','Pilot acceptance','Dev Singh','Alex Rao','16.11.2026','20.11.2026','Maya Sen','Date Approved'),"
                     + " (207,'Pending','Riverside Works',NULL,NULL,NULL,'Date revision requested',NULL,'Alex Rao',NULL,NULL,'Maya Sen','Date Requested'),"
@@ -171,6 +177,15 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     project.executeBatch();
                     access.executeBatch();
                 }
+                sql.execute("UPDATE ProjectData SET CUSTOMERNAME='Riverside Works', PRODUCTSUIT='Service Operations', PRODUCTTOOL='VPN Access', FUNCTION_NAME='Access rollout', RESPONSIBILITY='Delivery planning' WHERE SR_NO IN (100,101)");
+                sql.execute("ALTER TABLE scm_mobile_project_task ADD CHECK (PROJECT_ID<>101)");
+                sql.execute("UPDATE DaywiseTask SET MANAGER_NAME='Gia Gupta', FUNCTION_NAME='Access rollout', WEIGHTAGE='30.25', Task_ID='Riverside Works-18' WHERE SR_NO=210");
+                sql.execute("CREATE TABLE TlMaster (Developer VARCHAR(128), Team_Leader VARCHAR(128), ImplementerName VARCHAR(128), Customer_name VARCHAR(128), PRODUCT_SUIT VARCHAR(128), SECURITY_SOLTION VARCHAR(128))");
+                sql.execute("CREATE TABLE TlMasterSupport (Developer VARCHAR(128), Team_Leader VARCHAR(128), ImplementerName VARCHAR(128), Customer_name VARCHAR(128), PRODUCT_SUIT VARCHAR(128), SECURITY_SOLTION VARCHAR(128))");
+                sql.execute("INSERT INTO TlMaster VALUES ('Dev Singh','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access'),"
+                    + " ('Noor Paul','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access'),"
+                    + " ('Alex Kim','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access'),"
+                    + " ('Ari Shah','Dev Singh','Gia Gupta','Riverside Works','Service Operations','VPN Access')");
             }
             AuthService.Directory directory = (company, username, password) -> "QA-A".equals(company) && "directory".equals(username) && "Synthetic-AD-only-22".equals(password);
             AuthService.Delivery deliver = (channel, destination, code) -> {

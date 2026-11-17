@@ -9,11 +9,12 @@ import { useSession } from '../../scm/session';
 import { Action, DetailRecord, Screen, type } from '../../ui/Primitives';
 import { TaskDatePanel } from '../../ui/TaskDatePanel';
 import { TaskDateQueues } from '../../ui/TaskDateQueues';
+import { TaskReassignment } from '../../ui/TaskAssignmentForm';
 import { TaskWorkLog } from '../../ui/TaskWorkLog';
 import { WorkspaceTabs } from '../../ui/Workspace';
 import { color } from '../../ui/theme';
 
-const queues = ['To me', 'By me', 'Completed', 'Dates'] as const;
+const queues = ['To me', 'By me', 'Completed', 'Dates', 'Team'] as const;
 
 export default function AssignedTasksScreen() {
   const { state } = useSession();
@@ -38,6 +39,7 @@ function TaskQueue({ queue, initialTask, onComplete, onRequest }: {
 }) {
   const incoming = queue === 0;
   const completed = queue === 2;
+  const team = queue === 4;
   const [confirmation, setConfirmation] = useState(initialTask ? 'Task T-' + initialTask + ' completed' : '');
   const [cursors, setCursors] = useState<number[]>([]);
   const [open, setOpen] = useState(initialTask);
@@ -45,8 +47,9 @@ function TaskQueue({ queue, initialTask, onComplete, onRequest }: {
   const read = useCallback((grant: Grant, signal: AbortSignal) => {
     if (!authClient) return Promise.reject(new AuthError('unavailable'));
     return incoming ? authClient.myTasks(grant, before, signal)
-      : completed ? authClient.completedTasks(grant, before, signal) : authClient.assignedTasks(grant, before, signal);
-  }, [before, completed, incoming]);
+      : completed ? authClient.completedTasks(grant, before, signal)
+        : team ? authClient.assignmentQueue(grant, before, signal) : authClient.assignedTasks(grant, before, signal);
+  }, [before, completed, incoming, team]);
   const { result, reload } = useProtectedRead(read);
   const next = result.kind === 'ready' ? result.data.next : null;
 
@@ -80,16 +83,24 @@ function TaskQueue({ queue, initialTask, onComplete, onRequest }: {
                   reload();
                 }
               }} /> : null}
+              {task.reassignable ? <TaskReassignment id={task.id} onDone={() => {
+                setConfirmation('Task T-' + task.id + ' reassigned');
+                reload();
+              }} /> : null}
               {incoming || completed ? <TaskWorkLog id={task.id} onComplete={() => onComplete(task.id)} /> : null}
               <DetailRecord rows={[
                 ['Product suite', task.suite], ['Product tool', task.tool], ['Team lead', task.lead], ['Developer', task.developer],
                 ['Assigned by', task.assigner],
+                ...(task.reference ? [['SCM reference', task.reference]] as const : []),
+                ...(task.priority ? [['Priority', task.priority]] as const : []),
+                ...(task.weight ? [['Weight', task.weight + '%']] as const : []),
                 ...(task.dateAccess ? [] : [['Start date', task.start], ['Due date', task.due]] as const),
               ]} />
             </View>
           </Phase> : null}
         </View>)}
-      </View> : <Text style={type.body}>{incoming ? 'No open tasks are assigned to you.' : completed ? 'You have no completed tasks.' : 'You haven’t assigned any tasks in this queue.'}</Text>}
+      </View> : <Text style={type.body}>{team ? 'You have no team tasks available to reassign.'
+        : incoming ? 'No open tasks are assigned to you.' : completed ? 'You have no completed tasks.' : 'You haven’t assigned any tasks in this queue.'}</Text>}
       {before || next ? <View style={styles.actions}>
         {before ? <Action label="Previous page" icon="back" secondary
           onPress={() => { setOpen(null); setCursors(cursors.slice(0, -1)); }} /> : null}

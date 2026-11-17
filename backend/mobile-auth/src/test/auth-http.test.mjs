@@ -304,6 +304,59 @@ await test('profile, projects, tasks and work logs enforce the verified account 
   assert.equal(rolledBack.revision, rollbackDate.revision);
   assert.equal(rolledBack.due, '');
   assert.deepEqual(rolledBack.history, []);
+  const roster = await client.assignees(many.grant, 100, true);
+  assert.deepEqual(roster.items.map(({ name }) => name), ['Dev Singh', 'Gia Gupta', 'Noor Paul']);
+  assert.deepEqual((await client.assignees(many.grant, 100, true, 'noor')).items.map(({ name }) => name), ['Noor Paul']);
+  await assert.rejects(() => client.assignees(a.grant, 44, true), { code: 'forbidden' });
+  await assert.rejects(() => client.assignees(many.grant, 44, true), { code: 'not-found' });
+  const draft = {
+    module: 'Pilot clean-up & handoff', description: 'Complete the follow-up checks for the VPN pilot.',
+    start: '2026-11-27', due: '30.11.2026', priority: 'High', weight: '20',
+    candidate: roster.items.find(({ name }) => name === 'Gia Gupta').key,
+    requestKey: 'scm-stage-assignment-retry-001',
+  };
+  await assert.rejects(() => client.createTask(many.grant, 100, { ...draft, due: '26.11.2026' }), { code: 'invalid-task-draft' });
+  await assert.rejects(() => client.createTask(many.grant, 100, { ...draft, weight: '70' }), { code: 'task-weight-limit' });
+  await assert.rejects(() => client.createTask(many.grant, 100, { ...draft, candidate: 'z'.repeat(43) }), { code: 'candidate-unavailable' });
+  const created = await Promise.all([client.createTask(many.grant, 100, draft), client.createTask(many.grant, 100, draft)]);
+  assert.equal(created[0], created[1]);
+  const taskId = created[0];
+  await assert.rejects(() => client.createTask(many.grant, 100, { ...draft, module: 'Changed draft' }), { code: 'task-assignment-conflict' });
+  const asCreated = (await client.projectTasks(many.grant, 100, {})).items.filter((task) => task.id === taskId);
+  assert.equal(asCreated.length, 1);
+  assert.match(asCreated[0].reference, /^Riverside Works-\d+$/);
+  assert.equal(asCreated[0].priority, 'High');
+  assert.equal(asCreated[0].weight, '20');
+  assert.deepEqual(asCreated.map(({ module, start, due, developer, status }) => [module, start, due, developer, status]),
+    [[draft.module, '27.11.2026', '30.11.2026', 'Gia Gupta', 'Pending']]);
+  assert.ok((await client.myTasks(many.grant)).items.some((task) => task.id === taskId));
+  assert.ok((await client.assignedTasks(many.grant)).items.some((task) => task.id === taskId));
+  assert.ok((await client.assignmentQueue(many.grant)).items.some((task) => task.id === taskId));
+  await assert.rejects(() => client.assignees(many.grant, 210, false), { code: 'not-found' });
+  await assert.rejects(() => client.assignees(b.grant, taskId, false), { code: 'not-found' });
+  const transfer = await client.assignees(many.grant, taskId, false);
+  assert.deepEqual(transfer.items.map(({ name }) => name), ['Dev Singh', 'Noor Paul']);
+  await assert.rejects(() => client.reassignTask(many.grant, taskId, 'a'.repeat(43), transfer.items[1].key), { code: 'task-assignment-conflict' });
+  await client.reassignTask(many.grant, taskId, transfer.revision, transfer.items[1].key);
+  await assert.rejects(() => client.reassignTask(many.grant, taskId, transfer.revision, transfer.items[0].key), { code: 'task-assignment-conflict' });
+  const transferred = (await client.projectTasks(many.grant, 100, {})).items.find((task) => task.id === taskId);
+  assert.equal(transferred.developer, 'Noor Paul');
+  assert.equal(transferred.due, '30.11.2026');
+  assert.ok(!(await client.myTasks(many.grant)).items.some((task) => task.id === taskId));
+  const recipientChallenge = await client.signIn(credentials('totp'));
+  const recipient = await client.verify(recipientChallenge.challengeId, totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', Math.floor(Date.now() / 30_000)));
+  assert.equal(recipient.kind, 'authenticated');
+  assert.equal((await client.myTasks(recipient.grant)).items.find((task) => task.id === taskId).developer, 'Noor Paul');
+  const rollbackDraft = { ...draft, module: 'Assignment rollback fixture', weight: '25', requestKey: 'scm-stage-rollback-assignment-01' };
+  await assert.rejects(() => client.createTask(many.grant, 101, rollbackDraft), { code: 'unavailable' });
+  assert.deepEqual((await client.projectTasks(many.grant, 101, {})).items, []);
+  const exactWeight = await client.createTask(many.grant, 100, {
+    ...draft, module: 'Remaining allocation', weight: '49.75', requestKey: 'scm-stage-exact-assignment-001',
+  });
+  assert.ok(exactWeight > taskId);
+  await assert.rejects(() => client.createTask(many.grant, 100, {
+    ...draft, weight: '0.01', requestKey: 'scm-stage-excess-assignment-001',
+  }), { code: 'task-weight-limit' });
   await client.signOut(a.grant);
   await assert.rejects(() => client.profile(a.grant), { code: 'expired' });
   await assert.rejects(() => client.projects(a.grant, {}), { code: 'expired' });
