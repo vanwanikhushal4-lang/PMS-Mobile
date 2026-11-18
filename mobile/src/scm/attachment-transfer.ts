@@ -1,16 +1,34 @@
-import { Directory, Paths } from 'expo-file-system';
+import { Directory, File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { fetch } from 'expo/fetch';
 import { Platform } from 'react-native';
 import type { Attachment, AttachmentTarget } from './attachments-contract';
 import { AuthError, submissionKey, type Grant } from './auth-api';
-import { authConfig } from './auth-config';
+import { authConfig, frontendPreview } from './auth-config';
+import { preview } from './frontend-preview';
 
 const retention = 86_400_000;
 
 export async function openAttachment(target: AttachmentTarget, asset: Attachment, grant: Grant, signal: AbortSignal,
                                      onProgress: (percent: number | null) => void, onReady: () => void) {
   if (!authConfig) throw new AuthError('unavailable');
+  if (frontendPreview) {
+    const file = preview.attachment(target, asset.kind);
+    if (!file) throw new AuthError('not-found');
+    if (signal.aborted) throw new AuthError('transport');
+    if (Platform.OS === 'web') {
+      onReady();
+      const anchor = document.createElement('a');
+      anchor.href = file.uri;
+      anchor.download = file.name;
+      document.body.appendChild(anchor);
+      try { anchor.click(); } finally { anchor.remove(); }
+    } else {
+      const source = new File(file.uri);
+      await stageAndOpen(source.readableStream(), asset, source.size, signal, () => {}, onProgress, onReady);
+    }
+    return;
+  }
   const endpoint = new URL('projects/attachments/download', authConfig.url);
   const connection = new AbortController();
   const stop = () => connection.abort();

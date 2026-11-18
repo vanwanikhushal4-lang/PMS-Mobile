@@ -1,5 +1,15 @@
 # SCM mobile migration
 
+## Current ownership
+
+From 18 November 2026, this work covers the mobile frontend and API requirements. The backend team owns service implementation, data migrations, authorization, storage and integrations. The [backend API handoff](backend-api-requirements.md) maps implemented screens to their expected contracts and records future requirements. Previous Java validation notes below describe historical work, not current backend delivery or deployment readiness.
+
+Run the frontend independently with `EXPO_PUBLIC_SCM_FRONTEND_PREVIEW=1 npm run start` from `mobile/`. The visible sample-data banner identifies this development-only mode. Its data and mutations reset on reload, and invitations are not sent.
+
+The frontend kickoff form supports company-local date/time, physical/virtual meeting details, searchable participant groups, an agenda and an optional plan of action. The iPhone simulator completed a sample virtual meeting, opened its detail with all three participant groups, and opened the selected PDF in the native share sheet with its original name. This verifies local frontend behavior only. The kickoff options and multipart submission contract is ready for the backend team.
+
+Frontend validation passed TypeScript, ESLint, 27 mobile tests and iOS/Android Hermes exports. The handoff was checked against all 49 referenced endpoint paths and its source links. Android device interaction and the new multipart endpoint against the team's backend remain unverified.
+
 The supplied Java checkout is the source of truth for business behavior. React Native will replace the JSP screens incrementally on iOS and Android. Keep MySQL behind the Java service; the app never talks directly to it. Keep the JSP client working until native parity is demonstrated. A browser redirect or an embedded JSP screen does not count as native parity.
 
 | Step | Deliverable | Required acceptance evidence |

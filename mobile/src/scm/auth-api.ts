@@ -1,5 +1,6 @@
 import { decodeAuthStep, type AuthStep } from './auth-contract.ts';
 import { decodeAttachments, type AttachmentTarget } from './attachments-contract.ts';
+import { decodeKickoffOptions, type KickoffTarget } from './kickoff-contract.ts';
 import { decodeWorkspace } from './workspace-contract.ts';
 import { decodeCreatedProject, decodeDocumentReviewQueue, decodeProfile, decodeProject, decodeProjectCreateOptions,
   decodeProjectRecordDetail, decodeProjectRecords, decodeProjects, type DocumentQueueMode, type DocumentReviewDecision, type DocumentReviewScope,
@@ -38,7 +39,7 @@ export class AuthError extends Error {
     | 'date-range' | 'date-reason-length' | 'date-change-conflict' | 'date-no-reviewer'
     | 'invalid-task-draft' | 'task-weight-limit' | 'task-assignment-conflict' | 'candidate-unavailable'
     | 'invalid-project-draft' | 'project-context-unavailable' | 'project-function-unavailable' | 'project-request-conflict' | 'project-duplicate'
-    | 'project-review-conflict';
+    | 'project-review-conflict' | 'invalid-kickoff' | 'invalid-kickoff-file' | 'kickoff-conflict' | 'kickoff-participants-unavailable';
   readonly taskId?: number;
   constructor(code: AuthError['code'], taskId?: number) { super(code); this.name = 'AuthError'; this.code = code; this.taskId = taskId; }
 }
@@ -100,7 +101,7 @@ function confirmedBatch(result: unknown, kind: string, items: readonly { id: num
 export function createAuthClient(config: AuthConfig, send: Requester = fetch, timeoutMs = 9000) {
   async function request(path: string, body: object | undefined, signal?: AbortSignal, token?: string) {
     const url = new URL(path, config.url);
-    const missingReason = ['projects/detail', 'projects/records', 'projects/records/detail', 'projects/records/review', 'projects/tasks', 'projects/favorite',
+    const missingReason = ['projects/detail', 'projects/records', 'projects/records/detail', 'projects/records/review', 'projects/kickoff/options', 'projects/tasks', 'projects/favorite',
       'tasks/assignments/project-options', 'tasks/assignments/create'].includes(path) ? 'project-not-found'
       : ['tasks/work-log', 'tasks/progress', 'tasks/complete', 'tasks/dates/detail', 'tasks/dates/request', 'tasks/dates/approve',
         'tasks/dates/request-batch', 'tasks/dates/approve-batch',
@@ -210,6 +211,12 @@ export function createAuthClient(config: AuthConfig, send: Requester = fetch, ti
       const data = decodeProjectRecordDetail(await request('projects/records/detail', target, signal, grant.sessionToken), target);
       if (!data) throw new AuthError('bad-response');
       return data;
+    },
+    kickoffOptions: async (grant: Grant, target: KickoffTarget, query?: string, signal?: AbortSignal) => {
+      const response = await request('projects/kickoff/options', { ...target, query }, signal, grant.sessionToken);
+      const options = decodeKickoffOptions(response, target);
+      if (!options) throw new AuthError('bad-response');
+      return options;
     },
     documentReviewQueue: async (grant: Grant, scope: DocumentReviewScope, before?: number, signal?: AbortSignal,
       mode: DocumentQueueMode = 'pending') => {

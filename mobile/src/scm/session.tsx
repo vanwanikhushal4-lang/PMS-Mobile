@@ -2,7 +2,7 @@ import * as SecureStore from 'expo-secure-store';
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type PropsWithChildren } from 'react';
 import { AppState, Platform } from 'react-native';
 import { AuthError, restoreGrant, type Grant } from './auth-api';
-import { authClient, authConfig } from './auth-config';
+import { authClient, authConfig, frontendPreview } from './auth-config';
 import type { AuthStep } from './auth-contract';
 
 type Active = { grant: Grant; session: Extract<AuthStep, { kind: 'authenticated' }> };
@@ -43,6 +43,11 @@ export function SessionProvider({ children }: PropsWithChildren) {
     const controller = new AbortController();
     const bootstrap = async () => {
       try {
+        if (frontendPreview && authClient) {
+          const result = await authClient.signIn({ companyCode: 'PREVIEW', username: 'preview', password: 'preview' }, controller.signal);
+          if (!controller.signal.aborted && result.kind === 'authenticated') accept(result);
+          return;
+        }
         if (!vault || !authConfig || !authClient) return;
         const stored = await SecureStore.getItemAsync(key);
         if (controller.signal.aborted) return;

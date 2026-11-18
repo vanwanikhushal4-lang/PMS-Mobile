@@ -5,6 +5,7 @@ import { AuthError, type Grant } from '../../../../../../scm/auth-api';
 import { authClient } from '../../../../../../scm/auth-config';
 import { isProjectRecordScope, projectRecordSections, projectRecordTitles } from '../../../../../../scm/projects-contract';
 import { useProtectedRead } from '../../../../../../scm/protected-read';
+import { useSession } from '../../../../../../scm/session';
 import { FormMessage, Phase, TextAction } from '../../../../../../ui/Access';
 import { BrandedTopBar } from '../../../../../../ui/Brand';
 import { DetailRecord, Screen, type } from '../../../../../../ui/Primitives';
@@ -29,6 +30,7 @@ export default function ProjectRecordScreen() {
       : Promise.reject(new AuthError('unavailable'));
   }, [scope, id, recordId]);
   const { result, reload } = useProtectedRead(read);
+  const { state } = useSession();
   const title = scope ? projectRecordTitles[scope] : 'Project record';
   const detail = result.kind === 'ready' ? result.data : null;
   const missing = result.kind === 'error' && (result.code === 'not-found' || result.code === 'forbidden');
@@ -38,6 +40,8 @@ export default function ProjectRecordScreen() {
   const [feedback, setFeedback] = useState<{ key: string; success: boolean; message: string } | null>(null);
   const message = feedback?.key === recordKey ? feedback : null;
   const visibleReview = !!detail?.review;
+  const canSchedule = state.kind === 'active' && state.session.identity.capabilities.includes('projects.kickoff-schedule')
+    && scope === 'understanding' && ['ud approved by md', 'ud approved by si'].includes(detail?.item.status.toLowerCase() ?? '');
 
   function back() {
     if (router.canGoBack()) router.back();
@@ -54,6 +58,9 @@ export default function ProjectRecordScreen() {
         <Text accessibilityRole="header" style={type.title}>{detail?.item.reference || title}</Text>
         {detail?.item.status ? <Text style={type.eyebrow}>{detail.item.status}</Text> : null}
         {detail ? <Text style={type.body}>{[detail.item.date, detail.item.format].filter(Boolean).join(' · ') || 'Date unavailable'}</Text> : null}
+        {canSchedule ? <TextAction label="Schedule kickoff" testID="open-kickoff" onPress={() => router.push({
+          pathname: '/projects/[id]/kickoff/[recordId]', params: { id, recordId },
+        })} /> : null}
       </View>
       {result.kind === 'loading' ? <Text accessibilityLiveRegion="polite" style={type.caption}>Loading record…</Text> : null}
       {result.kind === 'error' ? <>
