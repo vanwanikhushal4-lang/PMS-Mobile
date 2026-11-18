@@ -2,7 +2,7 @@
 
 The React Native client lives in this folder. The [migration plan](../docs/mobile-migration.md) tracks feature coverage and explains how to generate the legacy route inventory from an SCM source checkout.
 
-Current work is frontend only. The [backend API handoff](../docs/backend-api-requirements.md) lists the endpoints, payloads, roles, uploads, pagination and error behavior needed from the backend team.
+The [backend API contract](../docs/backend-api-requirements.md) lists the endpoints, payloads, roles, uploads, pagination and error behavior. Use the [Java backend setup](../backend/mobile-auth/README.md) to run the full seeded service locally.
 
 ## Preview without a backend
 
@@ -13,7 +13,7 @@ EXPO_PUBLIC_SCM_FRONTEND_PREVIEW=1 npm run ios -- --localhost --port 8088
 
 Use `npm run web` or `npm run android` in the same command for those targets. Development preview opens a sample account automatically and displays a sample-data banner. It uses client memory, makes no API calls, and resets on reload. Projects, bookmarks, project creation, document review, kickoff scheduling/file selection, task assignment, work logs/completion, date changes/approvals and the publishing browser can be inspected. Account challenge/recovery flows still require their real integration or the existing isolated fixtures. Selected kickoff files stay on the device in this mode. No invitations are sent.
 
-To use a real backend, unset `EXPO_PUBLIC_SCM_FRONTEND_PREVIEW` and set `EXPO_PUBLIC_SCM_AUTH_URL` to the team's HTTPS base ending in `/mobile/v1/auth/`. Preview is gated by `__DEV__` and cannot authenticate a release build. Existing fixture instructions below are historical integration options, not prerequisites for frontend work.
+To connect to the backend, unset `EXPO_PUBLIC_SCM_FRONTEND_PREVIEW` and set `EXPO_PUBLIC_SCM_AUTH_URL` to its HTTPS base ending in `/mobile/v1/auth/`. Preview is gated by `__DEV__` and cannot authenticate a release build. The Java loopback fixture supports scheduling and attachment downloads.
 
 ## Integrated development
 

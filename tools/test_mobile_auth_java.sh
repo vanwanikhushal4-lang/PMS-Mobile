@@ -33,7 +33,7 @@ war="$base/webapps/scm-auth-qa/WEB-INF"
 find "$module/src/test/java" -name '*.java' -print0 | xargs -0 javac --release 8 -cp "$base/scm-mobile-auth.jar:$legacy_lib/*:$h2" -d "$war/classes"
 cp "$base/scm-mobile-auth.jar" "$h2" "$war/lib/"
 jar cf "$war/lib/scm-test-task-entity.jar" -C "$legacy_classes" "$work_log_entity" -C "$legacy_classes" "$date_history_entity"
-for dep in spring-{aop,beans,context,core,expression,jdbc,tx,web,webmvc}-4.2.5.RELEASE.jar commons-logging-1.2.jar aopalliance-1.0.jar json-20180813.jar; do
+for dep in spring-{aop,beans,context,core,expression,jdbc,tx,web,webmvc}-4.2.5.RELEASE.jar commons-logging-1.2.jar aopalliance-1.0.jar json-20180813.jar commons-fileupload-1.3.1.jar commons-io-2.4.jar; do
  cp "$legacy_lib/$dep" "$war/lib/"
 done
 for dep in hibernate-core-5.1.5.Final hibernate-commons-annotations-5.0.1.Final hibernate-jpa-2.1-api-1.0.0.Final \
@@ -49,7 +49,7 @@ if [[ ${SCM_AUTH_QA_SERVE:-0} != 1 ]]; then
 fi
 SCM_MOBILE_AUTH_KEY=$(openssl rand -base64 32) SCM_MOBILE_AUTH_JDBC_URL=jdbc:mysql://127.0.0.1:1/unused_stage_schema \
  SCM_MOBILE_AUTH_JDBC_USER=unused_stage_reader SCM_MOBILE_AUTH_JDBC_PASSWORD=not-used-by-the-loopback-test \
- CATALINA_HOME="$tomcat" CATALINA_BASE="$base" CATALINA_OPTS="--add-opens=java.base/java.lang=ALL-UNNAMED -Dscm.qa.inbox=$base/inbox.tsv" \
+ CATALINA_HOME="$tomcat" CATALINA_BASE="$base" CATALINA_OPTS="--add-opens=java.base/java.lang=ALL-UNNAMED -Dscm.qa.inbox=$base/inbox.tsv -Dscm.qa.commonsMultipart=${SCM_AUTH_QA_COMMONS_MULTIPART:-true}" \
  "$tomcat/bin/catalina.sh" run > "$base/tomcat.log" 2>&1 &
 pid=$!
 qa="http://127.0.0.1:$port/scm-auth-qa/mobile/v1/auth/"

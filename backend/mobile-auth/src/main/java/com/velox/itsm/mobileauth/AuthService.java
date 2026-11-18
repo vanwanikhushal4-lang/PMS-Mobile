@@ -7,6 +7,7 @@ import java.security.MessageDigest;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Locale;
@@ -32,6 +33,7 @@ public final class AuthService implements AutoCloseable {
     private final LongSupplier clock;
     private final String dummyHash;
     private final Path attachmentRoot;
+    private final ZoneId kickoffZone;
     private final Expiring<Session> sessions = new Expiring<>(10000, item -> item.until);
     private final Expiring<Pending> pending = new Expiring<>(5000, item -> item.until);
     private final Expiring<Reset> resets = new Expiring<>(2000, item -> item.until);
@@ -41,8 +43,13 @@ public final class AuthService implements AutoCloseable {
     });
 
     public AuthService(Accounts accounts, Secrets secrets, Directory directory, Delivery delivery, LongSupplier clock, Path attachmentRoot) {
+        this(accounts, secrets, directory, delivery, clock, attachmentRoot, ZoneId.of("Asia/Kolkata"));
+    }
+
+    public AuthService(Accounts accounts, Secrets secrets, Directory directory, Delivery delivery, LongSupplier clock, Path attachmentRoot, ZoneId kickoffZone) {
         this.accounts = accounts; this.secrets = secrets; this.directory = directory; this.delivery = delivery; this.clock = clock;
         this.attachmentRoot = attachmentRoot;
+        this.kickoffZone = kickoffZone;
         dummyHash = secrets.passwordHash(secrets.token());
     }
 
@@ -57,6 +64,7 @@ public final class AuthService implements AutoCloseable {
             case "session": case "sign-out": case "workspace": case "profile":
             case "projects/list": case "projects/detail": case "projects/records": case "projects/records/detail":
             case "projects/records/review-queue": case "projects/records/review":
+            case "projects/kickoff/options":
             case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
             case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
@@ -241,6 +249,7 @@ public final class AuthService implements AutoCloseable {
                 break;
             case "projects/list": case "projects/detail": case "projects/records": case "projects/records/detail":
             case "projects/records/review-queue": case "projects/records/review":
+            case "projects/kickoff/options":
             case "projects/tasks": case "projects/favorite":
             case "projects/create-options": case "projects/create":
             case "projects/publishing/tree": case "projects/publishing/orders": case "projects/publishing/order": case "projects/publishing/tasks":
@@ -269,6 +278,13 @@ public final class AuthService implements AutoCloseable {
     }
 
     private Reply projects(String action, JSONObject input, String key, Account account, long now) throws SQLException {
+        if ("projects/kickoff/options".equals(action)) {
+            if (!ProjectKickoff.allowed(account)) return rejected(403, "forbidden");
+            if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
+            if (!ProjectKickoff.validOptions(input)) return rejected(400, "invalid-kickoff");
+            JSONObject options = accounts.kickoffOptions(account, input, kickoffZone);
+            return options == null ? rejected(404, "project-not-found") : reply(200, options);
+        }
         if (action.startsWith("projects/attachments/")) {
             if (!account.projectWorkspace()) return rejected(403, "forbidden");
             if (!take("projects/" + key, 100, now)) return rejected(429, "rate-limited");
@@ -307,17 +323,42 @@ public final class AuthService implements AutoCloseable {
         return projects == null ? rejected(404, "project-not-found") : reply(200, projects);
     }
 
+    Reply scheduleKickoff(String bearer, KickoffFiles.Source source) throws SQLException {
+        long now = clock.getAsLong();
+        String key = key(bearer);
+        Session session = key == null ? null : sessions.get(key, now);
+        Account account = session == null ? null : current(session.ref);
+        if (account == null) return rejected(401, "expired");
+        if (!ProjectKickoff.allowed(account)) return rejected(403, "forbidden");
+        if (!take("kickoff/" + key, 24, now)) return rejected(429, "rate-limited");
+        if (attachmentRoot == null) return rejected(503, "attachments-unavailable");
+        try (KickoffFiles.Upload upload = source.read(attachmentRoot)) {
+            if (!ProjectKickoff.validDraft(upload.details, kickoffZone)) return rejected(400, "invalid-kickoff");
+            // An upload can outlive its session or an account change. Recheck before writing.
+            Account verified = current(session.ref);
+            if (verified == null || sessions.get(key, clock.getAsLong()) != session) return rejected(401, "expired");
+            if (!ProjectKickoff.allowed(verified)) return rejected(403, "forbidden");
+            JSONObject result = accounts.scheduleKickoff(verified, upload);
+            return result == null ? rejected(404, "project-not-found") : reply("rejected".equals(result.getString("kind")) ? 409 : 200, result);
+        } catch (KickoffFiles.Invalid failure) {
+            return rejected(failure.status, "invalid-kickoff");
+        } catch (IOException failure) {
+            LOG.warning("SCM kickoff attachment storage unavailable: " + failure.getClass().getSimpleName());
+            return rejected(503, "attachments-unavailable");
+        }
+    }
+
     private Reply projectAttachments(JSONObject input, Account account, boolean download) throws SQLException {
         ProjectAttachments.Target target = ProjectAttachments.Target.parse(input, download);
         if (target == null) return rejected(400, "invalid-filter");
-        Map<String, String> files = accounts.projectAttachments(account, target);
+        ProjectAttachments.Names files = accounts.projectAttachments(account, target);
         if (files == null) return rejected(404, "attachment-not-found");
-        if (!download) return reply(200, ProjectAttachments.list(target, files));
-        String filename = files.get(target.kind);
+        if (!download) return reply(200, ProjectAttachments.list(target, files.display));
+        String filename = files.storage.get(target.kind);
         if (filename == null) return rejected(404, "attachment-not-found");
         if (attachmentRoot == null) return rejected(503, "attachments-unavailable");
         try {
-            ProjectAttachments.Download content = ProjectAttachments.open(attachmentRoot, filename);
+            ProjectAttachments.Download content = ProjectAttachments.open(attachmentRoot, filename, files.display.get(target.kind));
             return content == null ? rejected(404, "attachment-not-found") : new Reply(200, null, content);
         } catch (IOException failure) {
             LOG.warning("SCM attachment storage unavailable: " + failure.getClass().getSimpleName());

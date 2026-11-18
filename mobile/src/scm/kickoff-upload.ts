@@ -46,7 +46,8 @@ export async function scheduleKickoff(grant: Grant, draft: KickoffDraft, agenda:
   const timer = setTimeout(stop, 90_000);
   try {
     const response = await fetch(endpoint.href, { method: 'POST', body, credentials: 'omit', redirect: 'error', signal: request.signal,
-      headers: { Accept: 'application/json', Authorization: 'Bearer ' + grant.sessionToken } });
+      headers: { Accept: 'application/json', Authorization: 'Bearer ' + grant.sessionToken,
+        ...(Platform.OS !== 'web' ? { 'X-SCM-Filename-Encoding': 'percent' } : {}) } });
     if (response.url !== endpoint.href) throw new AuthError('bad-response');
     if (response.status === 401) throw new AuthError('expired');
     if (response.status === 403) throw new AuthError('forbidden');

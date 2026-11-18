@@ -131,9 +131,12 @@ final class ProjectRecords {
     }
 
     static JSONObject summary(ResultSet row) throws SQLException {
-        return new JSONObject().put("id", row.getInt("SR_NO"))
-            .put("reference", text(row, "REFERENCE_CODE")).put("date", text(row, "RECORD_DATE"))
-            .put("status", text(row, "RECORD_STATUS")).put("format", text(row, "MEETING_FORMAT"));
+        int id = row.getInt("SR_NO");
+        String reference = text(row, "REFERENCE_CODE"), format = text(row, "MEETING_FORMAT");
+        if (reference.isEmpty() && !format.isEmpty()) reference = "M-" + id;
+        return new JSONObject().put("id", id)
+            .put("reference", reference).put("date", text(row, "RECORD_DATE"))
+            .put("status", text(row, "RECORD_STATUS")).put("format", format);
     }
 
     static String text(ResultSet row, String column) throws SQLException {

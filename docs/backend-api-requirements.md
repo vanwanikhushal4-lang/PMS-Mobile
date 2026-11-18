@@ -2,7 +2,7 @@
 
 Updated 18 November 2026. Frontend implementation lives in `mobile/`.
 
-The mobile work is frontend only from this point forward. The backend team owns API implementation, database design, authorization, integrations, file storage, email/SMS, and deployment. Existing Java work in this repository is historical reference. This document describes what the mobile client needs; it does not certify that those endpoints exist in a deployed environment.
+This document tracks the mobile client and Java API contract. The [Java backend setup](../backend/mobile-auth/README.md) describes the isolated test service, schema migrations, and deployment configuration. The planned legacy modules below still need implementation.
 
 ## Delivery order and frontend coverage
 
@@ -172,7 +172,7 @@ Exact field bounds: [project contracts](../mobile/src/scm/projects-contract.ts).
 
 ## Kickoff scheduling
 
-This is a new frontend contract for the backend team to implement. No new kickoff backend is delivered with this frontend change.
+The Java service implements both endpoints below. Eligible legacy roles with the corresponding sidebar scope and project access receive the scheduling capability. Each request also requires an approved understanding record and a purchase order granted to that account, company, and project. The service uses the deployment's `SCM_MOBILE_KICKOFF_TIME_ZONE`, which defaults to `Asia/Kolkata`.
 
 ### Options and participant search
 
@@ -210,7 +210,7 @@ Search `query` filters names in all three rosters. Each roster has at most 40 un
 | `agenda` | Binary file with original filename | Yes |
 | `plan` | Binary file with original filename | No |
 
-The HTTP client supplies the multipart boundary. Do not require a proprietary byte framing protocol.
+The HTTP client supplies the multipart boundary. Expo native requests send `X-SCM-Filename-Encoding: percent` because Expo percent-encodes multipart filenames. Other callers omit the header and send the literal filename.
 
 ```json
 {
@@ -239,7 +239,7 @@ Success after saving the meeting and its files:
 
 Return the existing result on an identical retry. The app opens `projects/records/detail` with `scope:"kickoff", recordId:meetingId` and then the normal attachments list. The meeting must also appear in the project's Records group. Use the legacy `M-<id>` reference and `Meeting Scheduled` status unless the migration team agrees a replacement.
 
-Errors are 400/413 `invalid-kickoff`, 409 `kickoff-conflict`, 409 `kickoff-participants-unavailable`, 401/403/404 as above. The app displays a warning if options reports `kickoffStatus:"Meeting Scheduled"`; backend must define whether another meeting is permitted. Invitation delivery and calendar integration are backend work; do not return a delivery claim unless confirmed.
+Errors are 400/413 `invalid-kickoff`, 409 `kickoff-conflict`, 409 `kickoff-participants-unavailable`, and 401/403/404 as above. The app displays a warning if options reports `kickoffStatus:"Meeting Scheduled"`. A new request key may schedule a follow-up meeting, as in the JSP workflow. Invitations and calendar delivery remain planned.
 
 Exact contract: [kickoff types and decoder](../mobile/src/scm/kickoff-contract.ts). Multipart construction: [upload adapter](../mobile/src/scm/kickoff-upload.ts).
 

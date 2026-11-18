@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { test } from 'node:test';
 import { createAuthClient, resolveAuthConfig } from '../../../../mobile/src/scm/auth-api.ts';
+import { decodeScheduledKickoff } from '../../../../mobile/src/scm/kickoff-contract.ts';
 
 const base = process.env.SCM_JAVA_QA_ENDPOINT;
 const datesBase = process.env.SCM_JAVA_DATE_BATCH_ENDPOINT;
@@ -790,6 +791,103 @@ await test('Sales Initiators see requirements they submitted in granted projects
   assert.equal((await send({ scope: 'requirement', mode: 'submitted', username: 'different-user' })).status, 400);
   assert.equal((await send({ scope: 'understanding', mode: 'submitted' })).status, 400);
   assert.equal((await send({ scope: 'requirement', mode: 'rejected' })).status, 400);
+});
+
+await test('kickoff options and multipart scheduling use the scoped order and persist retry-safe meeting records and files', async () => {
+  const api = createAuthClient(resolveAuthConfig(datesBase, true));
+  const director = await api.signIn(credentials('kickoff-director'));
+  const sales = await api.signIn(credentials('requirements-sales'));
+  const foreign = await api.signIn(credentials('document-other-company', 'QA-B'));
+  assert.ok(director.session.identity.capabilities.includes('projects.kickoff-schedule'));
+  const target = { id: 44, recordId: 71 };
+  const options = await api.kickoffOptions(director.grant, target);
+  assert.equal(options.purchaseOrder, 'PO-910');
+  assert.equal(options.understanding, 'UD-71');
+  assert.equal(options.timeZone, 'Asia/Kolkata');
+  assert.equal(options.kickoffStatus, '');
+  assert.ok(options.rooms.includes('SecureIT - 901'));
+  assert.ok(options.providers.includes('teams'));
+  assert.deepEqual(options.roster.heads.choices, [{ id: 15, name: 'Riya Naik' }]);
+  assert.deepEqual(options.roster.sales.choices, [{ id: 18, name: 'Meera Shah' }]);
+  const searched = await api.kickoffOptions(director.grant, target, 'SAMIRA');
+  assert.deepEqual(searched.roster.managers.choices, [{ id: 13, name: 'Samira Rao' }]);
+  assert.deepEqual(searched.roster.heads.choices, []);
+  await assert.rejects(() => api.kickoffOptions(sales.grant, target), { code: 'forbidden' });
+  await assert.rejects(() => api.kickoffOptions(foreign.grant, target), { code: 'not-found' });
+  await assert.rejects(() => api.kickoffOptions(director.grant, { ...target, recordId: 72 }), { code: 'not-found' });
+
+  const draft = { ...target, requestKey: 'qa-kickoff-virtual-key-001', time: '2026-11-25T10:30', mode: 'Virtual Mode',
+    provider: 'teams', connection: 'https://meet.fixture.invalid/riverside', heads: [15], sales: [18], managers: [13] };
+  const attachmentFolder = `${inbox}-attachments-_scm-auth-dates-qa`;
+  const agenda = await readFile(`${attachmentFolder}/Riverside agenda.pdf`);
+  const namesBefore = (await readdir(attachmentFolder)).sort();
+  const send = (details, grant = director.grant, file = agenda, withPlan = true, nativeNames = true) => {
+    const body = new FormData();
+    body.append('details', JSON.stringify(details));
+    if (file !== null) body.append('agenda', new Blob([file], { type: 'application/pdf' }), nativeNames ? 'Sprint%20%E2%80%93%20agenda.pdf' : 'Sprint %20 agenda.pdf');
+    if (withPlan) body.append('plan', new Blob(['Confirm pilot access.\n'], { type: 'text/plain' }), nativeNames ? 'Pilot%20plan.txt' : 'Pilot plan.txt');
+    return fetch(new URL('projects/kickoff/schedule', datesBase), { method: 'POST', body, headers: {
+      ...(nativeNames ? { 'X-SCM-Filename-Encoding': 'percent' } : {}), ...(grant ? { Authorization: `Bearer ${grant.sessionToken}` } : {}),
+    } });
+  };
+  assert.equal((await send(draft, null)).status, 401);
+  assert.equal((await send(draft, sales.grant)).status, 403);
+  assert.equal((await send(draft, foreign.grant)).status, 404);
+  assert.equal((await send({ ...draft, time: '2026-11-31T10:30' })).status, 400);
+  assert.equal((await send(draft, director.grant, null)).status, 400);
+  assert.equal((await send(draft, director.grant, 'This is not a PDF')).status, 400);
+  assert.equal((await send(draft, director.grant, Buffer.alloc(10 * 1024 * 1024 + 1))).status, 413);
+  const wrongGroup = await send({ ...draft, heads: [20] });
+  assert.equal(wrongGroup.status, 409);
+  assert.equal((await wrongGroup.json()).reason, 'kickoff-participants-unavailable');
+  assert.equal((await send({ ...draft, connection: 'fixture rollback' })).status, 503);
+  assert.deepEqual((await readdir(attachmentFolder)).sort(), namesBefore);
+  assert.deepEqual((await api.projectRecords(director.grant, 44)).kickoff.items.map(({ id }) => id), [81]);
+  assert.equal((await api.kickoffOptions(director.grant, target)).kickoffStatus, '');
+
+  const retries = await Promise.all([send(draft), send(draft)]);
+  for (const response of retries) assert.equal(response.status, 200, await response.clone().text());
+  const scheduled = await retries[0].json();
+  assert.deepEqual(await retries[1].json(), scheduled);
+  const meetingId = decodeScheduledKickoff(scheduled, target);
+  assert.ok(meetingId > 81);
+  const mismatchedRetry = await send({ ...draft, connection: 'https://meet.fixture.invalid/changed' });
+  assert.equal(mismatchedRetry.status, 409);
+  assert.equal((await mismatchedRetry.json()).reason, 'kickoff-conflict');
+  const modifiedBytes = Buffer.concat([agenda, Buffer.from('\n')]);
+  assert.equal((await send(draft, director.grant, modifiedBytes)).status, 409);
+  assert.equal((await api.kickoffOptions(director.grant, target)).kickoffStatus, 'Meeting Scheduled');
+  const meetingTarget = { scope: 'kickoff', id: 44, recordId: meetingId };
+  const meeting = await api.projectRecordDetail(director.grant, meetingTarget);
+  assert.deepEqual(meeting.item, { id: meetingId, reference: `M-${meetingId}`, date: '25-11-2026 10:30 AM', status: 'Meeting Scheduled', format: 'Virtual Mode' });
+  assert.equal(meeting.fields.projectHead, 'Riya Naik');
+  assert.equal(meeting.fields.salesManager, 'Meera Shah');
+  assert.equal(meeting.fields.productManager, 'Samira Rao');
+  assert.equal(meeting.fields.meetingLink, draft.connection);
+  assert.deepEqual((await api.projectRecords(director.grant, 44)).kickoff.items.map(({ id }) => id), [meetingId, 81]);
+  assert.deepEqual(await api.projectAttachments(director.grant, meetingTarget), [
+    { kind: 'kickoff-agenda', name: 'Sprint – agenda.pdf', mimeType: 'application/pdf' },
+    { kind: 'kickoff-plan', name: 'Pilot plan.txt', mimeType: 'text/plain' },
+  ]);
+  const download = (grant, kind) => fetch(new URL('projects/attachments/download', datesBase), {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${grant.sessionToken}` },
+    body: JSON.stringify({ ...meetingTarget, kind }),
+  });
+  const pdf = await download(director.grant, 'kickoff-agenda');
+  assert.equal(pdf.status, 200);
+  assert.match(pdf.headers.get('content-disposition'), /filename\*=UTF-8''Sprint%20%E2%80%93%20agenda\.pdf$/);
+  assert.deepEqual(Buffer.from(await pdf.arrayBuffer()), agenda);
+  assert.equal(await (await download(director.grant, 'kickoff-plan')).text(), 'Confirm pilot access.\n');
+  await assert.rejects(() => api.projectAttachments(foreign.grant, meetingTarget), { code: 'not-found' });
+  const { provider, connection, ...common } = draft;
+  const physical = await send({ ...common, mode: 'Physical Mode', rooms: ['SecureIT - 901'], requestKey: 'qa-kickoff-physical-key-002' }, director.grant, agenda, false, false);
+  assert.equal(physical.status, 200, await physical.clone().text());
+  const physicalTarget = { ...meetingTarget, recordId: (await physical.json()).meetingId };
+  assert.equal((await api.projectRecordDetail(director.grant, physicalTarget)).fields.room, 'SecureIT - 901');
+  assert.deepEqual(await api.projectAttachments(director.grant, physicalTarget), [{ kind: 'kickoff-agenda', name: 'Sprint %20 agenda.pdf', mimeType: 'application/pdf' }]);
+  const filesAfter = await readdir(attachmentFolder);
+  assert.equal(filesAfter.length, namesBefore.length + 3);
+  assert.ok(filesAfter.every((name) => !name.startsWith('.scm-kickoff-')));
 });
 
 await test('authenticator enrollment generates a usable secret and prevents reusing a time slot', async () => {

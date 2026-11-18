@@ -111,6 +111,29 @@ final class ProjectAttachments {
         return reply;
     }
 
+    static final class Names {
+        final Map<String, String> storage, display;
+        Names(Map<String, String> storage, Map<String, String> display) { this.storage = storage; this.display = display; }
+    }
+
+    static Names names(Connection db, Accounts.Account account, Target target) throws SQLException {
+        Map<String, String> storage = filenames(db, account, target);
+        if (storage == null) return null;
+        if (target.scope != Scope.KICKOFF || storage.isEmpty()) return new Names(storage, storage);
+        Map<String, String> display = new LinkedHashMap<>(storage);
+        try (PreparedStatement query = db.prepareStatement("SELECT FILE_KIND,STORAGE_NAME,ORIGINAL_NAME FROM scm_mobile_kickoff_file WHERE COMPANY_CODE=? AND MEETING_ID=?")) {
+            query.setString(1, account.companyCode);
+            query.setInt(2, target.recordId);
+            try (ResultSet row = query.executeQuery()) {
+                while (row.next()) {
+                    String kind = row.getString(1), original = row.getString(3);
+                    if (row.getString(2).equals(storage.get(kind)) && validFilename(original)) display.put(kind, original);
+                }
+            }
+        }
+        return new Names(storage, display);
+    }
+
     private static boolean validFilename(String name) {
         if (name == null || name.isEmpty() || name.length() > 255 || !name.equals(name.trim()) || name.endsWith(".")
                 || name.codePoints().anyMatch(Character::isISOControl)) return false;
@@ -122,8 +145,8 @@ final class ProjectAttachments {
             || "no file available".equals(literal) || "file not attached".equals(literal));
     }
 
-    static Download open(Path configured, String filename) throws IOException {
-        if (!validFilename(filename)) return null;
+    static Download open(Path configured, String filename, String displayName) throws IOException {
+        if (!validFilename(filename) || !validFilename(displayName)) return null;
         Path root = configured.toRealPath();
         Path file = root.resolve(filename);
         try {
@@ -132,7 +155,7 @@ final class ProjectAttachments {
             SeekableByteChannel channel = Files.newByteChannel(file, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS);
             try {
                 long length = channel.size();
-                return new Download(filename, length, Channels.newInputStream(channel));
+                return new Download(displayName, length, Channels.newInputStream(channel));
             } catch (IOException | RuntimeException failure) {
                 channel.close();
                 throw failure;

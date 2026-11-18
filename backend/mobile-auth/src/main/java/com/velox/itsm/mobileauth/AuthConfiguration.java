@@ -3,6 +3,7 @@ package com.velox.itsm.mobileauth;
 import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Properties;
@@ -27,7 +28,7 @@ public class AuthConfiguration {
             return new AuthService(new Accounts(mobileDataSource(env), () -> context.getBean(SessionFactory.class)), secrets,
                 Integrations.directory(env.getProperty("SCM_MOBILE_AUTH_AD_URL"), env.getProperty("SCM_MOBILE_AUTH_AD_COMPANY"), env.getProperty("SCM_MOBILE_AUTH_AD_REALM")),
                 Integrations.delivery(env.getProperty("SCM_MOBILE_AUTH_DELIVERY_URL"), env.getProperty("SCM_MOBILE_AUTH_DELIVERY_BEARER")),
-                System::currentTimeMillis, attachmentRoot(env));
+                System::currentTimeMillis, attachmentRoot(env), ZoneId.of(env.getProperty("SCM_MOBILE_KICKOFF_TIME_ZONE", "Asia/Kolkata")));
         } finally { Arrays.fill(key, (byte)0); }
     }
 

@@ -17,14 +17,17 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.util.Scanner;
 import java.util.function.LongSupplier;
+import javax.servlet.MultipartConfigElement;
 import javax.servlet.ServletContext;
 import javax.servlet.ServletException;
+import javax.servlet.ServletRegistration;
 import org.h2.jdbcx.JdbcDataSource;
 import org.hibernate.SessionFactory;
 import org.hibernate.cfg.AvailableSettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.web.multipart.commons.CommonsMultipartResolver;
 import org.springframework.web.servlet.config.annotation.EnableWebMvc;
 import org.springframework.web.servlet.support.AbstractAnnotationConfigDispatcherServletInitializer;
 
@@ -39,6 +42,10 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
     @Override protected Class<?>[] getRootConfigClasses() { return null; }
     @Override protected Class<?>[] getServletConfigClasses() { return new Class<?>[]{ testDelivery ? QA.class : ProductionProfile.class }; }
     @Override protected String[] getServletMappings() { return new String[]{ "/" }; }
+    @Override protected void customizeRegistration(ServletRegistration.Dynamic registration) {
+        long fileLimit = 10L * 1024 * 1024;
+        registration.setMultipartConfig(new MultipartConfigElement("", fileLimit, 2 * fileLimit + 32_768, 0));
+    }
 
     @Configuration @EnableWebMvc
     public static class QA {
@@ -84,7 +91,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     history.executeBatch();
                 }
                 for (String resource : new String[]{"/var/schema.sql", "/var/schema-projects.sql", "/var/schema-tasks.sql", "/var/schema-project-workspace.sql",
-                        "/var/schema-task-assignment.sql", "/var/schema-project-creation.sql", "/var/schema-project-publishing.sql"}) {
+                        "/var/schema-task-assignment.sql", "/var/schema-project-creation.sql", "/var/schema-project-publishing.sql", "/var/schema-project-kickoff.sql"}) {
                     try (InputStream stream = QA.class.getResourceAsStream(resource); Scanner schema = new Scanner(stream, "UTF-8").useDelimiter("\\A")) {
                         for (String statement : schema.next().split(";")) if (!statement.trim().isEmpty()) sql.execute(statement);
                     }
@@ -108,10 +115,13 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 seed(connection, 16, "document-limited", "Neil Kapoor", "MD", "Non-AD", "neil@fixture.invalid", "+12025550116", "QA Service Operations", "QA-A", "off", hash, null, true);
                 seed(connection, 17, "document-other-company", "Alok Mehta", "MD", "Non-AD", "alok@fixture.invalid", "+12025550117", "QA Second Company", "QA-B", "off", hash, null, true);
                 seed(connection, 18, "requirements-sales", "Meera Shah", "Sales_Initiator", "Non-AD", "meera@fixture.invalid", "+12025550118", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 19, "kickoff-director", "Anil Sethi", "MD", "Non-AD", "anil@fixture.invalid", "+12025550119", "QA Service Operations", "QA-A", "off", hash, null, true);
+                seed(connection, 20, "kickoff-other-head", "Foreign Project Head", "Head_Projects", "Non-AD", "head-b@fixture.invalid", "+12025550120", "QA Second Company", "QA-B", "off", hash, null, true);
                 sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMS,Requirement_Documents' WHERE LOGINID=14");
                 sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMS' WHERE LOGINID IN (15,17)");
                 sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMSArchive,Requirement_Documents_Archive' WHERE LOGINID=16");
                 sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,Requirement_Documents' WHERE LOGINID=18");
+                sql.execute("UPDATE LOGINMASTER SET SIDEBAR_SCOPE='Home,PMS' WHERE LOGINID=19");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Pune', BRANCH='West office', DEPARTMENT='Commercial operations', SUB_DEPARTMENT='Delivery' WHERE LOGINID=1");
                 sql.execute("UPDATE LOGINMASTER SET LOCATION='Chennai', BRANCH='South office', DEPARTMENT='Engineering' WHERE LOGINID=2");
                 sql.execute("CREATE TABLE ProjectData (SR_NO INT PRIMARY KEY, PROJECTNAME VARCHAR(500), CUSTOMERNAME VARCHAR(500), FUNCTION_NAME VARCHAR(500), RESPONSIBILITY VARCHAR(500), PRODUCTSUIT VARCHAR(500), PRODUCTTOOL VARCHAR(500), Task_ID VARCHAR(500))");
@@ -125,6 +135,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                 sql.execute("INSERT INTO scm_mobile_project_access VALUES (1,'QA-A',41), (1,'QA-A',43), (1,'QA-A',44), (2,'QA-B',51), (1,'QA-B',52)");
                 sql.execute("INSERT INTO scm_mobile_project_access VALUES (14,'QA-A',47),(15,'QA-A',47),(16,'QA-A',47),(17,'QA-B',51)");
                 sql.execute("INSERT INTO scm_mobile_project_access VALUES (18,'QA-A',44),(18,'QA-A',47)");
+                sql.execute("INSERT INTO scm_mobile_project_access VALUES (19,'QA-A',44)");
                 sql.execute("ALTER TABLE ProjectData ADD SUBMITTEDBY VARCHAR(128)");
                 sql.execute("CREATE TABLE FunctionMaster (SR_NO INT PRIMARY KEY, MODULE VARCHAR(120), FUNCTION_NAME VARCHAR(240))");
                 sql.execute("INSERT INTO FunctionMaster VALUES (1,'PMS','Access rollout'),(2,'PMS','Development'),(3,'PMS','Implementation'),(4,'PMS','Development planning')");
@@ -230,6 +241,8 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
                     + " ('Noor Paul','Noor Paul','Maya Sen','Other Roster','Service Operations','Endpoint')");
                 seedPublishing(sql);
                 sql.execute("ALTER TABLE PurchaseOrder ADD MassPOFile VARCHAR(255)");
+                sql.execute("ALTER TABLE PurchaseOrder ADD KOM_Status VARCHAR(120)");
+                sql.execute("INSERT INTO scm_mobile_purchase_order_access VALUES (19,'QA-A',901,44)");
                 sql.execute("ALTER TABLE PurchaseOrder ADD productFeaturedFileList VARCHAR(255)");
                 sql.execute("ALTER TABLE PurchaseOrder ADD pouploadfile VARCHAR(255)");
                 sql.execute("UPDATE PurchaseOrder SET MassPOFile='Riverside masked.pdf', productFeaturedFileList='Riverside – features.txt',"
@@ -268,6 +281,21 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
         }
 
         @Bean public AuthController stageController(AuthService auth) { return new LoopbackController(auth); }
+
+        @Bean(name = "multipartResolver")
+        public CommonsMultipartResolver fixtureMultipartResolver() {
+            CommonsMultipartResolver resolver = new CommonsMultipartResolver() {
+                @Override public boolean isMultipart(javax.servlet.http.HttpServletRequest request) {
+                    return Boolean.getBoolean("scm.qa.commonsMultipart") && super.isMultipart(request);
+                }
+            };
+            long limit = 10L * 1024 * 1024;
+            resolver.setDefaultEncoding("UTF-8");
+            resolver.setMaxUploadSize(2 * limit + 32_768);
+            resolver.setMaxUploadSizePerFile(limit);
+            resolver.setResolveLazily(true);
+            return resolver;
+        }
     }
 
     @Configuration @EnableWebMvc @Import({AuthController.class, AuthConfiguration.class})
@@ -320,6 +348,7 @@ public class StagingInitializer extends AbstractAnnotationConfigDispatcherServle
         sql.execute("UPDATE ProjectKickOfMeeting SET Po_Number='PO-910', UD_number='UD-71', ProjectHead='Anika Mehta',"
             + " VideoConferenceMeeting='Teams', GeneratedLink='https://meet.fixture.invalid/riverside-kickoff',"
             + " UploadFile1='Riverside agenda.pdf', UploadFile2='Riverside meeting plan.pdf' WHERE SR_NO=81");
+        sql.execute("ALTER TABLE ProjectKickOfMeeting ADD CONSTRAINT fixture_kickoff_insert_failure CHECK (GeneratedLink <> 'fixture rollback')");
     }
 
     private static void seedDocumentReview(Statement sql) throws java.sql.SQLException {

@@ -33,6 +33,7 @@ public class AuthController {
     @RequestMapping(value = {"/sign-in", "/challenge/verify", "/challenge/resend", "/sign-out", "/recovery/start", "/recovery/verify", "/recovery/complete",
         "/projects/list", "/projects/detail", "/projects/records", "/projects/records/detail", "/projects/tasks", "/projects/favorite",
         "/projects/records/review-queue", "/projects/records/review",
+        "/projects/kickoff/options", "/projects/kickoff/schedule",
         "/projects/create-options", "/projects/create",
         "/projects/publishing/tree", "/projects/publishing/orders", "/projects/publishing/order", "/projects/publishing/tasks",
         "/projects/attachments/list", "/projects/attachments/download",
@@ -60,13 +61,20 @@ public class AuthController {
         String base = request.getContextPath() + "/mobile/v1/auth/";
         String path = request.getRequestURI();
         if (!path.startsWith(base) || request.getQueryString() != null) { error(response, 400, "account-unavailable"); return; }
-        if (withBody && (request.getContentType() == null || !"application/json".equals(request.getContentType().split(";", 2)[0].trim().toLowerCase(Locale.ROOT)))) {
+        String action = path.substring(base.length());
+        boolean scheduling = "projects/kickoff/schedule".equals(action);
+        String expectedType = scheduling ? "multipart/form-data" : "application/json";
+        if (withBody && (request.getContentType() == null || !expectedType.equals(request.getContentType().split(";", 2)[0].trim().toLowerCase(Locale.ROOT)))) {
             error(response, 415, "account-unavailable"); return;
         }
         String authorization = request.getHeader("Authorization");
         String bearer = authorization != null && authorization.startsWith("Bearer ") && authorization.length() == 50 ? authorization.substring(7) : null;
         try {
-            String action = path.substring(base.length());
+            if (scheduling) {
+                AuthService.Reply reply = auth.scheduleKickoff(bearer, root -> KickoffFiles.read(request, root));
+                write(response, reply.status, reply.body);
+                return;
+            }
             int limit = "tasks/dates/request-batch".equals(action) ? MAX_BODY * 5 : MAX_BODY;
             JSONObject data = withBody ? read(request, limit) : new JSONObject();
             AuthService.Reply reply = auth.dispatch(action, data, bearer, request.getRemoteAddr());

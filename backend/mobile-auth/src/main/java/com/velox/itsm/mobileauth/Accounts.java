@@ -1,11 +1,13 @@
 package com.velox.itsm.mobileauth;
 
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Map;
 import java.util.function.Supplier;
 import javax.sql.DataSource;
@@ -111,9 +113,25 @@ public final class Accounts {
         }
     }
 
-    Map<String, String> projectAttachments(Account account, ProjectAttachments.Target target) throws SQLException {
+    ProjectAttachments.Names projectAttachments(Account account, ProjectAttachments.Target target) throws SQLException {
         try (Connection db = source.getConnection()) {
-            return ProjectAttachments.filenames(db, account, target);
+            return ProjectAttachments.names(db, account, target);
+        }
+    }
+
+    JSONObject kickoffOptions(Account account, JSONObject input, ZoneId zone) throws SQLException {
+        try (Connection db = source.getConnection()) {
+            return ProjectKickoff.options(db, account, input, zone);
+        }
+    }
+
+    JSONObject scheduleKickoff(Account account, KickoffFiles.Upload upload) throws SQLException, IOException {
+        for (int attempt = 0; ; attempt++) {
+            try (Connection db = source.getConnection()) {
+                return ProjectKickoff.schedule(db, account, upload);
+            } catch (SQLException failure) {
+                if (!allocationCollision(failure) || attempt >= 2 || upload.retained()) throw failure;
+            }
         }
     }
 
@@ -293,6 +311,7 @@ public final class Accounts {
             if (ProjectReview.allowed(this, ProjectRecords.Kind.REQUIREMENT)) capabilities.put("projects.requirement-review");
             if (ProjectReview.allowed(this, ProjectRecords.Kind.UNDERSTANDING)) capabilities.put("projects.understanding-review");
             if (ProjectReview.canListOwnRequirements(this)) capabilities.put("projects.requirements-submitted");
+            if (ProjectKickoff.allowed(this)) capabilities.put("projects.kickoff-schedule");
             if (taskWorkspace()) capabilities.put("tasks.assigned-by-me").put("tasks.assigned-to-me");
             if ((projectAccess || projectCreate) && TaskRoster.canCreate(this)) capabilities.put("tasks.create");
             if (TaskRoster.canCreate(this)) capabilities.put("tasks.create-standalone");
