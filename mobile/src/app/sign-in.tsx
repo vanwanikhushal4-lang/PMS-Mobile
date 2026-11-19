@@ -144,7 +144,7 @@ export default function SignInScreen() {
   return <Screen keyboard>
     <Animated.View style={[styles.head, arrival]}>
       <BrandedTopBar>
-        <TextAction label="Back to SCM Mobile" testID="auth-back" onPress={() => router.replace('/')} />
+        <TextAction label="Back to PMS" testID="auth-back" onPress={() => router.replace('/')} />
       </BrandedTopBar>
       {authConfig?.fixture && <View style={styles.environment}><Icon name="lock" /><Text style={type.caption}>Local test server · Use a test account</Text></View>}
       {authClient && <AccessRail labels={recovery ? ['Account', 'Recovery code', 'New password'] : ['Account', 'Verification']} index={stageIndex} />}

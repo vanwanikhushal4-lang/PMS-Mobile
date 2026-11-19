@@ -1,6 +1,7 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState, type PropsWithChildren } from 'react';
 import { Animated, StyleSheet, Text, View } from 'react-native';
+import { GlassLayer, useGlassControls } from './Glass';
 import { useArrival, useReducedMotion } from './motion';
 import { color } from './theme';
 
@@ -43,8 +44,12 @@ export function VeloxMark({ prominent = false }: { prominent?: boolean }) {
 }
 
 export function BrandedTopBar({ children }: PropsWithChildren) {
+  const glass = useGlassControls();
   return <View style={styles.bar}>
-    <View style={styles.navigation}>{children}</View>
+    <View style={[styles.navigation, glass && styles.glassNavigation]}>
+      {glass ? <GlassLayer radius={24} /> : null}
+      {children}
+    </View>
     <VeloxMark />
   </View>;
 }
@@ -67,6 +72,7 @@ const styles = StyleSheet.create({
   largeMark: { width: 29, height: 29 },
   bar: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   navigation: { flexShrink: 1 },
+  glassNavigation: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 16 },
   heading: { minHeight: 72, flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, paddingTop: 5 },
   headingCopy: { flex: 1, gap: 5 },
   context: { color: color.blue, fontSize: 13, lineHeight: 18, fontWeight: '600' },

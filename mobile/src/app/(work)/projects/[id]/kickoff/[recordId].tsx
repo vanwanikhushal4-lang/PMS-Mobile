@@ -10,6 +10,7 @@ import { useProtectedRead } from '../../../../../scm/protected-read';
 import { useSession } from '../../../../../scm/session';
 import { Field, FormMessage, Phase, SearchField, TextAction } from '../../../../../ui/Access';
 import { BrandedTopBar } from '../../../../../ui/Brand';
+import { GlassLayer, useGlassControls } from '../../../../../ui/Glass';
 import { Action, Screen, type } from '../../../../../ui/Primitives';
 import { WorkspaceTabs } from '../../../../../ui/Workspace';
 import { color } from '../../../../../ui/theme';
@@ -174,9 +175,9 @@ export default function KickoffScheduleScreen() {
         </View>
         <View style={styles.section}>
           <Text accessibilityRole="header" style={styles.heading}>Files</Text>
-          <TextAction label={agenda ? 'Replace agenda' : 'Choose agenda'} disabled={busy} testID="kickoff-agenda" onPress={() => void chooseFile(setAgenda)} />
+          <TextAction label={agenda ? 'Replace agenda' : 'Choose agenda'} material="glass" disabled={busy} testID="kickoff-agenda" onPress={() => void chooseFile(setAgenda)} />
           {agenda ? <Text style={type.body}>{agenda.name}</Text> : null}
-          <TextAction label={plan ? 'Replace plan of action' : 'Choose plan of action (optional)'} disabled={busy} testID="kickoff-plan" onPress={() => void chooseFile(setPlan)} />
+          <TextAction label={plan ? 'Replace plan of action' : 'Choose plan of action (optional)'} material="glass" disabled={busy} testID="kickoff-plan" onPress={() => void chooseFile(setPlan)} />
           {plan ? <><Text style={type.body}>{plan.name}</Text><TextAction label="Remove plan" disabled={busy} onPress={() => setPlan(null)} /></> : null}
         </View>
         {error ? <FormMessage message={error} /> : null}
@@ -190,6 +191,7 @@ function Choice({ label, selected, disabled, testID, onPress }: {
   label: string; selected: boolean; disabled: boolean; testID?: string; onPress: () => void;
 }) {
   const reduced = useReducedMotion();
+  const glass = useGlassControls() && selected;
   const [scale] = useState(() => new Animated.Value(1));
   useEffect(() => {
     if (reduced || disabled) { scale.stopAnimation(); scale.setValue(1); }
@@ -201,7 +203,8 @@ function Choice({ label, selected, disabled, testID, onPress }: {
   };
   return <Animated.View style={{ transform: [{ scale: reduced ? 1 : scale }] }}><Pressable accessibilityRole="button" accessibilityState={{ selected, disabled }} disabled={disabled} testID={testID} onPress={onPress}
     onPressIn={() => press(0.96)} onPressOut={() => press(1)}
-    style={({ pressed }) => [styles.choice, selected && styles.selected, pressed && styles.pressed]}>
+    style={({ pressed }) => [styles.choice, selected && styles.selected, glass && styles.glassChoice, pressed && !glass && styles.pressed]}>
+    {glass ? <GlassLayer radius={22} accent /> : null}
     <Text style={selected ? styles.selection : styles.label}>{label}</Text>
   </Pressable></Animated.View>;
 }
@@ -215,6 +218,7 @@ const styles = StyleSheet.create({
   choices: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   choice: { minHeight: 44, justifyContent: 'center', borderRadius: 8, borderWidth: 1, borderColor: color.edge, paddingHorizontal: 12, backgroundColor: color.panel },
   selected: { borderColor: color.blue, backgroundColor: color.raised },
+  glassChoice: { borderColor: 'transparent', backgroundColor: 'transparent', borderRadius: 22 },
   pressed: { backgroundColor: color.raised },
   label: { color: color.text, fontSize: 14, fontWeight: '500' },
   selection: { color: color.blue, fontSize: 14, fontWeight: '600' },

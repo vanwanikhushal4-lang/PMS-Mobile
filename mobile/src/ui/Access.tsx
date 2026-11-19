@@ -1,6 +1,7 @@
 import { useEffect, useState, type PropsWithChildren } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, TextInput, View, type TextInputProps } from 'react-native';
 import { Icon } from './Primitives';
+import { GlassLayer, useGlassControls } from './Glass';
 import { useReducedMotion } from './motion';
 import { color } from './theme';
 
@@ -67,14 +68,16 @@ export function Field({ label, secret = false, ...props }: TextInputProps & { la
   </View>;
 }
 
-export function TextAction({ label, onPress, disabled = false, testID, accessibilityLabel }: {
-  label: string; onPress: () => void; disabled?: boolean; testID?: string; accessibilityLabel?: string;
+export function TextAction({ label, onPress, disabled = false, testID, accessibilityLabel, material }: {
+  label: string; onPress: () => void; disabled?: boolean; testID?: string; accessibilityLabel?: string; material?: 'glass';
 }) {
   const [focused, setFocused] = useState(false);
+  const glass = useGlassControls() && material === 'glass';
   return <Pressable testID={testID} accessibilityRole="button" accessibilityLabel={accessibilityLabel}
     accessibilityState={{ disabled }} disabled={disabled} onPress={onPress}
     onFocus={() => setFocused(true)} onBlur={() => setFocused(false)}
-    style={({ pressed }) => [styles.textButton, focused && styles.focused, (pressed || disabled) && styles.dim]}>
+    style={({ pressed }) => [styles.textButton, glass && styles.glassTextButton, focused && styles.focused, (pressed || disabled) && styles.dim]}>
+    {glass ? <GlassLayer radius={24} /> : null}
     <Text style={styles.textAction}>{label}</Text>
   </Pressable>;
 }
@@ -83,7 +86,9 @@ export function SearchField({ label, placeholder, value, onChange, onSubmit, onC
   label: string; placeholder: string; value: string; onChange: (value: string) => void;
   onSubmit: () => void; onClear?: () => void; testID: string;
 }) {
-  return <View style={styles.inputFrame}>
+  const glass = useGlassControls();
+  return <View style={[styles.inputFrame, glass && styles.glassSearchFrame]}>
+    <GlassLayer radius={26} />
     <View style={styles.searchIcon}><Icon name="search" /></View>
     <TextInput style={[styles.input, styles.searchInput]} accessibilityLabel={label} placeholder={placeholder}
       placeholderTextColor={color.subtle} selectionColor={color.blue} maxLength={120} testID={testID}
@@ -119,6 +124,7 @@ const styles = StyleSheet.create({
   rail: { height: 2, backgroundColor: color.edge }, railMarker: { backgroundColor: color.blue, height: 2 },
   field: { gap: 8 }, label: { color: color.text, fontSize: 14, fontWeight: '500' },
   inputFrame: { minHeight: 52, flexDirection: 'row', alignItems: 'stretch', borderRadius: 8, borderWidth: 1, borderColor: color.edge, backgroundColor: color.panel },
+  glassSearchFrame: { borderRadius: 26, backgroundColor: 'transparent', borderColor: 'transparent', paddingEnd: 6 },
   focus: { ...StyleSheet.absoluteFill, borderRadius: 8, borderWidth: 1, borderColor: color.blue },
   input: { flex: 1, minHeight: 48, color: color.text, paddingHorizontal: 12, paddingVertical: 12, fontSize: 16 },
   searchInput: { minWidth: 0, paddingStart: 2, paddingEnd: 6 },
@@ -128,6 +134,7 @@ const styles = StyleSheet.create({
   clear: { color: color.muted, fontSize: 13 },
   iconButton: { width: 48, alignItems: 'center', justifyContent: 'center' }, dim: { opacity: 0.65 },
   textButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: 'transparent', borderRadius: 8 },
+  glassTextButton: { borderRadius: 24, paddingHorizontal: 16 },
   focused: { borderColor: color.blue },
   textAction: { color: color.blue, fontSize: 15, fontWeight: '500' },
   error: { color: color.error, backgroundColor: color.panel, padding: 12, fontSize: 14, lineHeight: 20, borderRadius: 8, borderLeftWidth: 2, borderLeftColor: color.error },

@@ -1,0 +1,22 @@
+name: PMSFlowTests
+options:
+  deploymentTarget:
+    iOS: '26.0'
+targets:
+  PMSFlowTests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tests]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.velox.scm.mobile.flowtests
+        GENERATE_INFOPLIST_FILE: YES
+schemes:
+  PMSFlowTests:
+    build:
+      targets:
+        PMSFlowTests: [test]
+    test:
+      targets:
+        - name: PMSFlowTests
+          parallelizable: false

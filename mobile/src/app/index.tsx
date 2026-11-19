@@ -21,7 +21,7 @@ export default function WelcomeScreen() {
     <View style={styles.main}>
       <Animated.View style={[styles.introduction, introduction]}>
         <VeloxMark prominent />
-        <Text accessibilityRole="header" style={styles.title}>SCM Mobile</Text>
+        <Text accessibilityRole="header" style={styles.title}>PMS</Text>
         <Text style={type.body}>Your projects, assigned work, and service incidents in one workspace.</Text>
       </Animated.View>
       <Animated.View style={[styles.controls, controls]}>

@@ -1,7 +1,8 @@
-import { useEffect, useState, type PropsWithChildren } from 'react';
+import { useContext, useEffect, useState, type PropsWithChildren } from 'react';
 import { Animated, Easing, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View, type ColorValue } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
+import { GlassLayer, NativeTabBar, useGlassControls } from './Glass';
 import { useReducedMotion } from './motion';
 import { color } from './theme';
 
@@ -27,10 +28,16 @@ export function Icon({ name, size = 18, tint = color.muted, filled = false }: { 
 }
 
 export function Screen({ children, keyboard = false, workspace = false }: PropsWithChildren<{ keyboard?: boolean; workspace?: boolean }>) {
+  const nativeTabBar = useContext(NativeTabBar);
+  const { bottom } = useSafeAreaInsets();
+  // The floating bar can overlap a scroll view nested in a project stack.
+  // Reserve room at the end while keeping content visible underneath the glass on scroll.
+  const tabClearance = workspace && nativeTabBar ? { paddingBottom: bottom + 88 } : undefined;
   return <View style={styles.root}>
     <SafeAreaView style={styles.safe} edges={workspace ? ['top', 'left', 'right'] : undefined}>
       <KeyboardAvoidingView style={styles.safe} enabled={keyboard} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <ScrollView contentContainerStyle={[styles.content, workspace && styles.workspace]} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={[styles.content, workspace && styles.workspace, tabClearance]} keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}>
           {children}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -42,6 +49,7 @@ export function Action({ label, onPress, icon = 'arrow', secondary = false, busy
   label: string; onPress: () => void; icon?: 'arrow' | 'back' | 'refresh' | 'lock' | 'exit' | 'check'; secondary?: boolean; busy?: boolean; testID?: string;
 }) {
   const reduced = useReducedMotion();
+  const glass = useGlassControls();
   const [scale] = useState(() => new Animated.Value(1));
   useEffect(() => {
     if (reduced || busy) { scale.stopAnimation(); scale.setValue(1); }
@@ -54,9 +62,11 @@ export function Action({ label, onPress, icon = 'arrow', secondary = false, busy
   return <Animated.View style={{ transform: [{ scale: reduced ? 1 : scale }] }}>
     <Pressable testID={testID} accessibilityRole="button" accessibilityState={{ busy, disabled: busy }}
       disabled={busy} onPressIn={() => press(0.984)} onPressOut={() => press(1)} onPress={onPress}
-      style={({ pressed }) => [styles.action, secondary ? styles.secondary : styles.primary, pressed && styles.pressed]}>
-      <Text style={[styles.actionLabel, { color: secondary ? color.text : color.onButton }]}>{label}</Text>
-      <Icon name={icon} tint={secondary ? color.blue : color.onButton} />
+      style={({ pressed }) => [styles.action, glass ? styles.glassAction : secondary ? styles.secondary : styles.primary,
+        pressed && !glass && styles.pressed]}>
+      <GlassLayer radius={26} accent={!secondary} />
+      <Text style={[styles.actionLabel, { color: glass || secondary ? color.text : color.onButton }]}>{label}</Text>
+      <Icon name={icon} tint={secondary ? color.blue : glass ? color.text : color.onButton} />
     </Pressable>
   </Animated.View>;
 }
@@ -83,6 +93,7 @@ const styles = StyleSheet.create({
   content: { flexGrow: 1, width: '100%', maxWidth: 525, alignSelf: 'center', paddingHorizontal: 24, paddingTop: 16, paddingBottom: 24 },
   workspace: { maxWidth: 920, paddingHorizontal: 20, paddingTop: 12 },
   action: { minHeight: 48, paddingVertical: 12, paddingHorizontal: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 16, borderRadius: 8 },
+  glassAction: { minHeight: 52, borderRadius: 26, paddingHorizontal: 20 },
   primary: { backgroundColor: color.lightButton },
   secondary: { backgroundColor: color.panel, borderWidth: 1, borderColor: color.edge },
   pressed: { opacity: 0.86 },

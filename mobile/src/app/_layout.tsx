@@ -1,6 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { StyleSheet, View } from 'react-native';
+import { GlassProvider } from '../ui/Glass';
 import { MotionProvider, useReducedMotion } from '../ui/motion';
 import { color } from '../ui/theme';
 import { SessionProvider, useSession } from '../scm/session';
@@ -27,7 +28,7 @@ function Routes() {
 
 export default function RootLayout() {
   return <View style={styles.root}>
-    <MotionProvider><SessionProvider><Routes /></SessionProvider></MotionProvider>
+    <MotionProvider><GlassProvider><SessionProvider><Routes /></SessionProvider></GlassProvider></MotionProvider>
   </View>;
 }
 

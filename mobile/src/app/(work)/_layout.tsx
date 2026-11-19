@@ -1,8 +1,10 @@
 import { Tabs } from 'expo-router';
+import { NativeTabs } from 'expo-router/native-tabs';
 import { Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { frontendPreview } from '../../scm/auth-config';
 import { useSession } from '../../scm/session';
+import { hasNativeGlass, NativeTabBar } from '../../ui/Glass';
 import { Icon } from '../../ui/Primitives';
 import { useReducedMotion } from '../../ui/motion';
 import { color } from '../../ui/theme';
@@ -12,6 +14,28 @@ export default function WorkLayout() {
   const reduced = useReducedMotion();
   if (state.kind !== 'active') return null;
   const { capabilities } = state.session.identity;
+  if (!frontendPreview && hasNativeGlass()) {
+    return <NativeTabBar.Provider value>
+      <NativeTabs tintColor={color.blue} minimizeBehavior={reduced ? 'never' : 'onScrollDown'}>
+      <NativeTabs.Trigger name="projects" disableAutomaticContentInsets hidden={!capabilities.includes('projects.read')} testID="tab-projects">
+        <NativeTabs.Trigger.Icon sf={{ default: 'folder', selected: 'folder.fill' }} />
+        <NativeTabs.Trigger.Label>Projects</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="tasks" disableAutomaticContentInsets hidden={!capabilities.includes('tasks.assigned-by-me')} testID="tab-work">
+        <NativeTabs.Trigger.Icon sf={{ default: 'checklist', selected: 'checklist.checked' }} />
+        <NativeTabs.Trigger.Label>My work</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="workspace" disableAutomaticContentInsets testID="tab-service">
+        <NativeTabs.Trigger.Icon sf="headphones" />
+        <NativeTabs.Trigger.Label>Service</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      <NativeTabs.Trigger name="profile" disableAutomaticContentInsets testID="tab-profile">
+        <NativeTabs.Trigger.Icon sf={{ default: 'person.crop.circle', selected: 'person.crop.circle.fill' }} />
+        <NativeTabs.Trigger.Label>Profile</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+      </NativeTabs>
+    </NativeTabBar.Provider>;
+  }
   return <View style={{ flex: 1 }}>
     <Tabs safeAreaInsets={frontendPreview ? { bottom: 0 } : undefined} screenOptions={{
     headerShown: false,

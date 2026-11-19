@@ -58,7 +58,7 @@ export default function ProjectRecordScreen() {
         <Text accessibilityRole="header" style={type.title}>{detail?.item.reference || title}</Text>
         {detail?.item.status ? <Text style={type.eyebrow}>{detail.item.status}</Text> : null}
         {detail ? <Text style={type.body}>{[detail.item.date, detail.item.format].filter(Boolean).join(' · ') || 'Date unavailable'}</Text> : null}
-        {canSchedule ? <TextAction label="Schedule kickoff" testID="open-kickoff" onPress={() => router.push({
+        {canSchedule ? <TextAction label="Schedule kickoff" material="glass" testID="open-kickoff" onPress={() => router.push({
           pathname: '/projects/[id]/kickoff/[recordId]', params: { id, recordId },
         })} /> : null}
       </View>

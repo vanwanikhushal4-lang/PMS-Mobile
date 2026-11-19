@@ -15,6 +15,35 @@ To run the seed service for a manual iOS check, run `SCM_AUTH_QA_SERVE=1 ./tools
 
 To exercise kickoff, sign in as `kickoff-director` in `QA-A` with the same fixture password. Open Riverside's project records, then UD-71 and Schedule kickoff. Upload a sample PDF as the agenda. The default Java tests use SCM's Spring multipart resolver. Set `SCM_AUTH_QA_COMMONS_MULTIPART=false` to exercise native Servlet multipart parsing.
 
+## Local test accounts
+
+These are the initial credentials created by the seeded Java service. Starting a new seed service restores these defaults. Password recovery within a running fixture changes that instance's password.
+
+| Company code | Username | Initial password | Additional sign-in step |
+| --- | --- | --- | --- |
+| `QA-A` | `alex` | `Stage-only-password-28` | None |
+| `QA-A` | `sms` | `Stage-only-password-28` | SMS code from the synthetic delivery inbox |
+| `QA-A` | `enroll` | `Stage-only-password-28` | Authenticator enrollment |
+| `QA-A` | `totp` | `Stage-only-password-28` | Authenticator code |
+| `QA-A` | `directory` | `Synthetic-AD-only-22` | Simulated directory verification |
+| `QA-A` | `disabled` | `Stage-only-password-28` | Account is disabled |
+| `QA-A` | `phone` | `Stage-only-password-28` | None |
+| `QA-A` | `schedule-lead` | `Stage-only-password-28` | None |
+| `QA-A` | `schedule-manager` | `Stage-only-password-28` | None |
+| `QA-A` | `schedule-assignee` | `Stage-only-password-28` | None |
+| `QA-A` | `project-creator` | `Stage-only-password-28` | None |
+| `QA-A` | `publish-reviewer` | `Stage-only-password-28` | None |
+| `QA-A` | `document-director` | `Stage-only-password-28` | None |
+| `QA-A` | `document-project-head` | `Stage-only-password-28` | None |
+| `QA-A` | `document-limited` | `Stage-only-password-28` | None |
+| `QA-A` | `requirements-sales` | `Stage-only-password-28` | None |
+| `QA-A` | `kickoff-director` | `Stage-only-password-28` | None |
+| `QA-B` | `alex` | `Second-company-fixture-only` | None |
+| `QA-B` | `document-other-company` | `Stage-only-password-28` | None |
+| `QA-B` | `kickoff-other-head` | `Stage-only-password-28` | None |
+
+The separate Node authentication fixture at `tools/scm_auth_fixture.mjs` uses company code `QA-OPS`. Its usernames `local`, `directory`, `sms`, `totp`, and `enroll` all use `SCM-qa-only-2026`. Its simulated verification code is `246810`.
+
 ## Integrating into a test deployment
 
 1. Build `scm-mobile-auth.jar`, and stage it in the test copy’s `WEB-INF/lib`. Keep the test initializer and H2 out of the deployed SCM application.

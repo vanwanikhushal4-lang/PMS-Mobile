@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Animated, Easing, I18nManager, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { IncidentActivity, Workspace } from '../scm/workspace-contract';
+import { GlassLayer, useGlassControls } from './Glass';
 import { type } from './Primitives';
 import { useReducedMotion } from './motion';
 import { color } from './theme';
@@ -12,6 +13,7 @@ const activityDate = new Intl.DateTimeFormat(undefined, {
 
 export function WorkspaceTabs({ labels, index, onSelect }: { labels: readonly string[]; index: number; onSelect: (index: number) => void }) {
   const reduced = useReducedMotion();
+  const glass = useGlassControls();
   const [width, setWidth] = useState(0);
   const [position] = useState(() => new Animated.Value(index));
   const tabWidth = width / labels.length;
@@ -24,14 +26,17 @@ export function WorkspaceTabs({ labels, index, onSelect }: { labels: readonly st
     animation.start();
     return () => animation.stop();
   }, [index, position, reduced]);
-  return <View accessibilityRole="tablist" style={styles.tabs} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
-    <Animated.View pointerEvents="none" aria-hidden style={[styles.tabFill, {
-      width: tabWidth,
+  return <View accessibilityRole="tablist" style={[styles.tabs, glass && styles.glassTabs]} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
+    {glass ? <GlassLayer radius={26} /> : null}
+    <Animated.View pointerEvents="none" aria-hidden style={[styles.tabFill, glass && styles.glassTabFill, {
+      width: Math.max(0, tabWidth - (glass ? 8 : 0)),
       transform: [{ translateX: reduced ? distance * index : position.interpolate({ inputRange: [0, 1], outputRange: [0, distance] }) }],
-    }]} />
+    }]}>
+      {glass && tabWidth > 8 ? <GlassLayer radius={22} accent /> : null}
+    </Animated.View>
     {labels.map((label, tab) => <Pressable key={label} accessibilityRole="tab" accessibilityState={{ selected: index === tab }}
       testID={`workspace-${label.toLowerCase()}`} onPress={() => onSelect(tab)}
-      style={({ pressed }) => [styles.tab, pressed && styles.pressed]}>
+      style={({ pressed }) => [styles.tab, pressed && (glass ? styles.glassPressed : styles.pressed)]}>
       <Text style={[styles.tabLabel, index === tab && styles.tabSelected]}>{label}</Text>
     </Pressable>)}
   </View>;
@@ -96,11 +101,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row', borderRadius: 8, overflow: 'hidden', marginBottom: 24,
     backgroundColor: color.panel, borderColor: color.edge, borderWidth: 1,
   },
+  glassTabs: { minHeight: 52, borderRadius: 26, borderWidth: 0, backgroundColor: 'transparent', overflow: 'visible' },
   tabFill: { position: 'absolute', top: 0, bottom: 0, start: 0, backgroundColor: color.raised, borderBottomColor: color.blue, borderBottomWidth: 2 },
+  glassTabFill: { top: 4, bottom: 4, start: 4, borderRadius: 22, backgroundColor: 'transparent', borderBottomWidth: 0 },
   tab: { flex: 1, minHeight: 48, paddingHorizontal: 4, paddingVertical: 8, alignItems: 'center', justifyContent: 'center' },
   tabLabel: { color: color.muted, fontSize: 15, fontWeight: '500', textAlign: 'center' },
   tabSelected: { color: color.text, fontWeight: '700' },
   pressed: { backgroundColor: color.edge },
+  glassPressed: { opacity: 0.75 },
   summary: { backgroundColor: color.panel, borderColor: color.edge, borderWidth: 1, borderRadius: 12, padding: 20, gap: 4 },
   total: { color: color.blue, fontSize: 56, fontWeight: '500', fontVariant: ['tabular-nums'], lineHeight: 64, letterSpacing: -2 },
   group: { gap: 12 },
