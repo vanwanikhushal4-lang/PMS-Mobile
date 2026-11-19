@@ -61,6 +61,8 @@ bash tools/test_pms_ios.sh <iOS-26-simulator-id> \
 
 The test installs PMS QA, copies the supplied sample PDF into its simulator Documents folder, and opens the system file picker during the kickoff flow. The Xcode result bundle includes screenshots.
 
+Verified manually on iPhone 17 Pro / iOS 26.5 using the standalone Release app and seeded Java service: sign-in, native tabs, kickoff participant selection, PDF selection in Files, meeting creation, and downloading the agenda into the native share sheet. The automated XCTest run still needs a complete pass through Files; its last run timed out while reading that process's accessibility hierarchy.
+
 For a shared test environment, set `EXPO_PUBLIC_SCM_URL` to the HTTPS application URL. This value is bundled into the app. Keep secrets out of all `EXPO_PUBLIC_` variables.
 
 ```sh

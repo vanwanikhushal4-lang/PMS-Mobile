@@ -8,6 +8,10 @@ final class KickoffFlow: XCTestCase {
         app.terminate()
         app.launch()
 
+        if !app.buttons["open-sign-in"].waitForExistence(timeout: 5) {
+            tap(app, "tab-profile")
+            tap(app, "workspace-sign-out")
+        }
         tap(app, "open-sign-in")
         type(app.textFields["auth-company"], "QA-A", sequential: true)
         type(app.textFields["auth-username"], "kickoff-director")
@@ -32,6 +36,9 @@ final class KickoffFlow: XCTestCase {
         tap(app, "Microsoft Teams")
         let connection = app.descendants(matching: .any)["kickoff-connection"].firstMatch
         type(connection, "https://meet.fixture.invalid/pms")
+        // An unhandled label tap dismisses the multiline field's keyboard.
+        app.staticTexts["Meeting link or credentials"].firstMatch.tap()
+        XCTAssertTrue(app.keyboards.firstMatch.waitForNonExistence(timeout: 5), "The meeting keyboard did not dismiss")
         if let scroll = mainScroll(in: app) { scroll.swipeUp() }
         tap(app, "kickoff-person-15")
         tap(app, "workspace-sales team")
@@ -41,14 +48,14 @@ final class KickoffFlow: XCTestCase {
         tap(app, "kickoff-agenda")
         pickAgenda(in: app)
 
-        let selected = app.staticTexts["PMS simulator agenda.pdf"]
+        let selected = app.staticTexts["PMS simulator agenda.pdf"].firstMatch
         XCTAssertTrue(selected.waitForExistence(timeout: 10), "The selected agenda is missing")
         tap(app, "submit-kickoff")
-        XCTAssertTrue(app.staticTexts["Meeting Scheduled"].waitForExistence(timeout: 20), "The saved meeting did not open")
-        XCTAssertTrue(app.staticTexts["https://meet.fixture.invalid/pms"].exists)
-        XCTAssertTrue(app.staticTexts["Riya Naik"].exists)
-        XCTAssertTrue(app.staticTexts["Meera Shah"].exists)
-        XCTAssertTrue(app.staticTexts["Samira Rao"].exists)
+        XCTAssertTrue(app.staticTexts["Meeting Scheduled"].firstMatch.waitForExistence(timeout: 20), "The saved meeting did not open")
+        XCTAssertTrue(app.staticTexts["https://meet.fixture.invalid/pms"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Riya Naik"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Meera Shah"].firstMatch.exists)
+        XCTAssertTrue(app.staticTexts["Samira Rao"].firstMatch.exists)
         snapshot("PMS scheduled meeting")
 
         tap(app, "attachment-kickoff-agenda")
@@ -79,10 +86,12 @@ final class KickoffFlow: XCTestCase {
             format: "identifier == %@ OR label == %@", identifier, identifier
         )).firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 12), "Missing \(identifier)")
-        for _ in 0..<5 where !element.isHittable {
+        for _ in 0..<8 where !element.isHittable {
             guard let scroll = mainScroll(in: app) else { break }
-            if element.frame.midY < scroll.frame.minY { scroll.swipeDown() }
-            else { scroll.swipeUp() }
+            let upward = element.frame.midY >= scroll.frame.minY + 40
+            let start = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.65 : 0.35))
+            let end = scroll.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: upward ? 0.35 : 0.65))
+            start.press(forDuration: 0.05, thenDragTo: end)
         }
         XCTAssertTrue(element.isHittable, "Cannot tap \(identifier)")
         element.tap()
@@ -97,13 +106,20 @@ final class KickoffFlow: XCTestCase {
     @MainActor
     private func pickAgenda(in app: XCUIApplication) {
         let file = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH %@", "PMS simulator agenda")).firstMatch
-        if !file.waitForExistence(timeout: 2) {
+        if !file.waitForExistence(timeout: 15) {
             tap(app, "Browse")
-            if !app.staticTexts["On My iPhone"].exists && !file.exists { tap(app, "Browse") }
-            if !file.exists && app.staticTexts["On My iPhone"].exists { tap(app, "On My iPhone") }
-            if !file.exists { tap(app, "PMS QA") }
+            // Files runs in a separate process; wait for its next hierarchy
+            // before issuing another navigation tap during the transition.
+            if !file.waitForExistence(timeout: 12) {
+                let localFiles = app.staticTexts["On My iPhone"].firstMatch
+                if !localFiles.waitForExistence(timeout: 3) { tap(app, "Browse") }
+                if !file.waitForExistence(timeout: 3) {
+                    tap(app, "On My iPhone")
+                    if !file.waitForExistence(timeout: 5) { tap(app, "PMS QA") }
+                }
+            }
         }
-        XCTAssertTrue(file.waitForExistence(timeout: 12), "The sample agenda is missing from Files")
+        XCTAssertTrue(file.waitForExistence(timeout: 15), "The sample agenda is missing from Files")
         file.tap()
     }
 
